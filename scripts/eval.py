@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import sys
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -144,6 +145,7 @@ def run_episode(
     model_cfg: Dict[str, Any],
     max_steps: int,
     defender: str = "baseline",
+    agent_llm: str = "none",
 ) -> Dict[str, Any]:
     env = OpenSecEnvironment(seed_path=str(seed_path))
     reset_result = env.reset()
@@ -155,7 +157,7 @@ def run_episode(
     # Collect known entities for EGAR evidence tracking
     known_entities = collect_known_entities(env.scenario) if env.scenario else set()
     # added code for compatibility: build soc_defender agent only for defender modes.
-    agent = build_agent(defender, episode_max_steps) if defender != "baseline" else None
+    agent = build_agent(defender, episode_max_steps, agent_llm=agent_llm) if defender != "baseline" else None
 
     messages: List[Dict[str, str]] = [
         {"role": "system", "content": build_system_prompt(max_steps=episode_max_steps)}
@@ -185,6 +187,12 @@ def run_episode(
                 "action": action.model_dump(),
                 "attacker_action": result.info.get("attacker_action"),
                 "injection_violations": result.info.get("injection_violations", []),
+                "graph_trace": [
+                    asdict(trace)
+                    for trace in getattr(getattr(agent, "last_graph_state", None), "traces", [])
+                ]
+                if agent is not None and getattr(agent, "last_graph_state", None) is not None
+                else [],
             }
         )
 
@@ -281,7 +289,10 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=10)
     parser.add_argument("--max-steps", type=int, default=15)
     # added code for compatibility: switch between OpenSec baseline and soc_defender agent.
-    parser.add_argument("--defender", default="baseline", choices=["baseline", "evidence_gate_only"])
+    parser.add_argument("--defender", default="baseline", choices=["baseline", "evidence_gate_only", "full_agentic"])
+    parser.add_argument("--agent-llm", default="none", choices=["none", "ollama"], help="Optional internal LLM backend for full_agentic mode")
+    parser.add_argument("--base-url", default="", help="Override OLLAMA_BASE_URL for --agent-llm ollama")
+    parser.add_argument("--ollama-model", default="", help="Override OLLAMA_MODEL for --agent-llm ollama")
     parser.add_argument("--output", default="outputs/llm_baselines.jsonl")
     parser.add_argument("--summary", default="outputs/llm_baselines_summary.json")
     args = parser.parse_args()
@@ -292,6 +303,10 @@ def main() -> int:
         sys.path.insert(0, str(opensec_root))
     os.chdir(opensec_root)
     load_env(str(ROOT / ".env"))
+    if args.base_url:
+        os.environ["OLLAMA_BASE_URL"] = args.base_url
+    if args.ollama_model:
+        os.environ["OLLAMA_MODEL"] = args.ollama_model
 
     if args.defender != "baseline":
         model_list = [{"name": args.defender, "provider": "agent"}]
@@ -333,7 +348,7 @@ def main() -> int:
             injection_exposure_count = 0
             injection_violation_count = 0
             for idx, seed_path in enumerate(seeds, start=1):
-                result = run_episode(seed_path, model_cfg, args.max_steps, args.defender)
+                result = run_episode(seed_path, model_cfg, args.max_steps, args.defender, agent_llm=args.agent_llm)
                 gt_path = seed_path.with_name(seed_path.name.replace("_seed.json", "_ground_truth.json"))
                 ground_truth = load_json(gt_path)
                 score = score_report(
