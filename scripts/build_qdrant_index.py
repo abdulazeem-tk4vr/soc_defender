@@ -3,12 +3,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
+import time
 from dataclasses import asdict
 from pathlib import Path
 from typing import Iterable
 
 from defender.rag_build import CorpusChunk, read_chunks_jsonl
 from defender.embeddings import HuggingFaceTransformerEmbedder, SentenceTransformerEmbedder
+
+
+def log(message: str) -> None:
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}", flush=True)
 
 
 def batched(items: tuple[CorpusChunk, ...], batch_size: int) -> Iterable[tuple[CorpusChunk, ...]]:
@@ -32,25 +38,34 @@ def build_qdrant_index(
     except ImportError as exc:
         raise RuntimeError("Install qdrant-client on RunPod to build the index") from exc
 
+    log(f"loading chunks path={chunks_path}")
     chunks = read_chunks_jsonl(chunks_path)
     if not chunks:
         raise ValueError(f"No chunks found in {chunks_path}")
+    log(f"chunks loaded={len(chunks)}")
     output_dir.mkdir(parents=True, exist_ok=True)
     if embedding_backend == "sentence-transformers":
+        log(f"loading sentence-transformers model={embedding_model} device={device or 'auto'}")
         embedder = SentenceTransformerEmbedder(embedding_model, device=device)
     elif embedding_backend == "transformers":
+        log(f"loading transformers model={embedding_model} device={device or 'auto'} max_length={max_length}")
         embedder = HuggingFaceTransformerEmbedder(embedding_model, device=device, max_length=max_length)
     else:
         raise ValueError(f"Unsupported embedding backend: {embedding_backend}")
+    log("embedding first chunk to determine vector size")
     first_vector = embedder.embed([chunks[0].text])[0]
+    log(f"vector_size={len(first_vector)}")
     client = QdrantClient(path=str(output_dir))
+    log(f"recreating qdrant collection={collection} output_dir={output_dir}")
     client.recreate_collection(
         collection_name=collection,
         vectors_config=VectorParams(size=len(first_vector), distance=Distance.COSINE),
     )
 
     point_id = 0
-    for batch in batched(chunks, batch_size):
+    total_batches = math.ceil(len(chunks) / batch_size)
+    started = time.time()
+    for batch_index, batch in enumerate(batched(chunks, batch_size), start=1):
         vectors = embedder.embed([chunk.text for chunk in batch])
         points = []
         for chunk, vector in zip(batch, vectors):
@@ -58,6 +73,9 @@ def build_qdrant_index(
             points.append(PointStruct(id=point_id, vector=vector, payload=payload))
             point_id += 1
         client.upsert(collection_name=collection, points=points)
+        if batch_index == 1 or batch_index % 25 == 0 or batch_index == total_batches:
+            elapsed = time.time() - started
+            log(f"indexed batch={batch_index}/{total_batches} points={point_id}/{len(chunks)} elapsed_seconds={elapsed:.1f}")
 
     manifest = {
         "status": "complete",
@@ -73,6 +91,7 @@ def build_qdrant_index(
         "max_length": max_length,
     }
     (output_dir / "build_manifest.json").write_text(json.dumps(manifest, indent=2))
+    log(f"manifest written path={output_dir / 'build_manifest.json'}")
     return manifest
 
 
