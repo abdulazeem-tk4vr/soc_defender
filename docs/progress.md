@@ -6,9 +6,11 @@ This document summarizes what has been implemented in `soc_defender`, what has b
 
 ## Current State
 
-The repository currently contains a deterministic MVP defender mode named `evidence_gate_only`. It is wired into a local OpenSec-compatible eval harness and has focused unit tests for action validation, SQL planning, policy behavior, and the public agent interface.
+The repository contains a deterministic MVP defender mode named `evidence_gate_only` and a wired `full_agentic` mode. Both are available through the local OpenSec-compatible eval harness.
 
-The implemented system now has the deterministic MVP plus full-agentic scaffolding. Regex scanner Layer 1, Prompt Guard fallback, LLM localization hooks, RAG interface, Ollama-compatible LLM adapter, investigator/verifier contracts, and graph-state orchestration exist. Live Prompt Guard 2, live Ollama execution, production Qdrant retrieval, LangChain provider switching, and true LangGraph runtime integration are still pending.
+The full-agentic path now updates the evidence registry and report tracker before LLM calls, feeds RAG context, scanner annotations, budget state, and registry entities into investigator/verifier prompts, calls the investigator once per step, and emits committed actions through a verifier-to-responder path. Deterministic EGAR containment gates remain authoritative; gate rejection falls back to investigation/fetch/report actions.
+
+The implemented system includes Regex scanner Layer 1, Prompt Guard fallback, Prompt Guard 2 with 22M fallback/windowing, LLM localization hooks, RAG interface, Ollama-compatible LLM adapter, investigator/verifier contracts, graph-state tracing, a plain-Python graph, and an optional LangGraph adapter behind `--use-langgraph`. LangChain provider switching remains explicitly deferred.
 
 ## Implemented Components
 
@@ -38,21 +40,22 @@ Relevant files:
 Implemented:
 
 - `scripts/eval.py` adapts the OpenSec eval flow for this sibling project.
-- Supports `--opensec-root`, `--defender`, `--output`, `--summary`, split/tier/limit controls, and baseline model execution.
+- Supports `--opensec-root`, `--defender`, `--output`, `--summary`, `--ollama`, `--agent-llm`, `--base-url`, `--ollama-model`, `--rag-path`, `--no-rag`, split/tier/limit controls, and baseline model execution.
 - Adds the `evidence_gate_only` local agent path while preserving the OpenSec action lifecycle: build one action, normalize it, then call `env.step(action)`.
 - Emits JSONL per-run output and JSON summary output.
 - Records summary metrics including reward, containment execution rate, report submission rate, false positive rate, injection exposure rate, and injection violation rate.
+- Baseline mode supports `--ollama`, using `OLLAMA_BASE_URL` and `OLLAMA_MODEL`, so baseline and full-agentic can be compared against the same RunPod model.
+- `--no-rag` disables Qdrant/RAG auto-load for ablation runs, even if `data/rag/qdrant/build_manifest.json` exists locally.
 
 Partially implemented or notable limitations:
 
-- The phase plan mentions `--ollama` and `--base-url`, but the current CLI does not expose those flags.
-- `eval_utils.py` has Ollama preflight/config helpers, but `eval.py` does not currently invoke Ollama provider execution.
-- Baseline parity against upstream OpenSec has not been documented in this repo.
+- Baseline parity is documented in `docs/baseline_parity.md`, but a fresh post-change `full_agentic` eval comparison still needs to be run.
 
 Relevant files:
 
 - `scripts/eval.py`
 - `scripts/eval_utils.py`
+- `docs/baseline_parity.md`
 - `outputs/smoke_eval.jsonl`
 - `outputs/smoke_summary.json`
 
@@ -62,7 +65,8 @@ Implemented:
 
 - `SocDefenderAgent` exposes `act()` and `next_action()`.
 - `build_agent()` constructs the local defender.
-- Only `evidence_gate_only` mode is supported.
+- `evidence_gate_only` and `full_agentic` modes are supported.
+- `full_agentic` can run through the plain-Python graph or optional LangGraph adapter with `use_langgraph=True` / `--use-langgraph`.
 - Unsupported modes fail fast with `ValueError`.
 
 Relevant files:
@@ -95,13 +99,13 @@ Implemented:
 - Identifies malicious indicators from a small deterministic keyword set.
 - Provides `support_for()` and `best_entities()` helpers for policy and report readiness.
 - Runs the regex injection scanner on evidence rows and stores `scanner_status` on each support record.
+- Stores localized scanner spans on support records.
+- Ranks entity support by trust tier, source table, malicious indicators, and supporting-field strength before selecting best entities.
 
 Partially implemented or notable limitations:
 
-- The domain extractor can over-classify strings that look like domains or filenames. The current smoke output selected `svchost.exe` as `attacker_domain`, which is incorrect for `seed-001`.
 - Domain extraction has been tightened so process names such as `svchost.exe` are not extracted as domains. Domains are now extracted from explicit domain fields and key-value text such as `dst_domain=notifysecure.io`.
-- Scanner status exists on support records but is not populated by any scanner yet.
-- Evidence support scoring is simple keyword matching, not kill-chain coherence.
+- Evidence support scoring is improved but still heuristic, not full kill-chain coherence.
 
 Relevant files:
 
@@ -143,7 +147,8 @@ Implemented:
 - Requires the exact entity to have trusted, content-exposed support.
 - Requires malicious indicators on the supporting evidence.
 - Blocks containment before `containment_min_step`.
-- Blocks evidence that only appears in flagged/localized scanner spans, although scanner span population is not yet implemented.
+- Blocks evidence that only appears in flagged/localized scanner spans.
+- Uses a separate budget helper to identify `investigate_first`, `gated_containment`, and `report_fill` phases.
 - Policy avoids repeating attempted containment and avoids acting on already-contained entities.
 - Default `containment_min_step` is now `5`.
 - The report deadline is now dynamic and defaults to `max_steps - 1` for each episode.
@@ -152,6 +157,7 @@ Implemented:
 Relevant files:
 
 - `defender/verifier.py`
+- `defender/budget.py`
 - `defender/policy.py`
 - `configs/calibration.yaml`
 
@@ -168,12 +174,13 @@ Implemented:
 - Builds a complete report object before the deadline.
 - Mirrors executed containment from observation state rather than claiming intended containment.
 - Submits at or after `report_deadline_step` or the final step.
+- Uses ranked evidence support from the registry when choosing report entities.
 
 Partially implemented or notable limitations:
 
 - Attribution is heuristic and can still be wrong or incomplete.
 - `initial_vector` defaults to `phish`.
-- There is no dedicated report builder with richer evidence ranking yet.
+- There is no dedicated report builder with confidence/source metadata yet.
 
 Relevant files:
 
@@ -202,11 +209,26 @@ Current behavior from smoke run:
 - Left `data_target` as `unknown`.
 - Had no injection violations in the smoke output.
 
+Current train calibration behavior:
+
+- Ran `evidence_gate_only --no-rag --split train --tier standard --limit 40`.
+- Mean reward: `2.36`.
+- Report submitted rate: `1.0`.
+- Containment executed rate: `0.45`.
+- Correct containment rate: `0.45`.
+- False positive rate: `0.225`.
+- Injection exposure rate: `0.975`.
+- Injection violation rate: `0.025`.
+- Failure analysis shows 9 containment false-positive runs, 1 injection-violation run, 0 low-EGAR runs, 54 repeated queries, 18 `attacker_domain` gaps, and 31 `data_target` gaps.
+
 Relevant files:
 
 - `defender/policy.py`
 - `outputs/smoke_eval.jsonl`
 - `outputs/smoke_summary.json`
+- `outputs/evidence_gate_train_standard40.jsonl`
+- `outputs/evidence_gate_train_standard40_summary.json`
+- `outputs/evidence_gate_train_standard40_failures.json`
 
 ### Failure Analysis
 
@@ -232,12 +254,14 @@ Implemented:
 - Unit tests for direct instruction override, prompt extraction, zero-width obfuscation, benign SOC text, and registry scanner integration.
 - Initial train-seed evaluation helper in `scripts/eval_regex_classifier.py`.
 - Prompt Guard fallback and LLM localization hook are connected through `InjectionScanner`.
+- Train-only regex example builder in `scripts/build_regex_training_set.py`.
 
 Partially implemented or notable limitations:
 
 - Scanner output is currently advisory metadata for the evidence gate.
-- Prompt Guard 2 and LLM localization are not implemented.
-- Prompt Guard fallback and localization interfaces exist, but the real Prompt Guard 2 model and live localizer calls are not enabled by default.
+- Prompt Guard 2 is enabled by default in `full_agentic` with `meta-llama/Prompt-Guard-86M`; pass `--prompt-guard2-model none` only to disable it for debugging.
+- Prompt Guard 2 falls back to `meta-llama/Prompt-Guard-22M` when the configured model fails to load and warns/continues when the model layer is unavailable.
+- LLM localization interfaces exist, but live localizer calls require `--agent-llm ollama`.
 - Span offsets are reported against normalized scanner text, not a full original-text offset map.
 - The regex evaluation helper was not run in this sandbox because Windows `py` launcher execution for non-pytest scripts is inconsistent here; run it from the normal shell with a pinned interpreter.
 
@@ -247,6 +271,7 @@ Relevant files:
 - `defender/regex_classifier.py`
 - `defender/scanner.py`
 - `scripts/eval_regex_classifier.py`
+- `scripts/build_regex_training_set.py`
 - `tests/test_regex_classifier.py`
 - `tests/test_scanner_regex_integration.py`
 
@@ -260,13 +285,15 @@ Implemented:
 - RAG retriever interface plus builtin keyword fallback in `defender/rag.py`.
 - Graph audit state in `defender/graph_state.py`.
 - Plain-Python graph scaffold in `defender/graph.py` that runs scanner, registry trace, RAG, investigator, budget, verifier, and responder nodes.
+- Verifier-to-responder mapping in `defender/responder.py`.
+- Optional LangGraph adapter in `defender/langgraph_adapter.py`.
 - `SocDefenderAgent(mode="full_agentic")` support.
-- Eval harness accepts `--defender full_agentic`.
+- Eval harness accepts `--defender full_agentic` and `--use-langgraph`.
 
 Partially implemented or notable limitations:
 
-- The graph scaffold returns one action and audit state; it does not call `env.step()`.
-- The graph is LangGraph-compatible in shape but does not depend on LangGraph yet.
+- The graph scaffold returns one action and audit state; eval remains responsible for `env.step()`.
+- The LangGraph adapter is optional and only runs when `langgraph` is installed and explicitly selected.
 - Live Ollama calls require `OLLAMA_BASE_URL` and are not used in deterministic tests.
 - Qdrant retrieval is implemented behind lazy imports and requires a runtime embedder plus a built local collection.
 - Qdrant build supports both Hugging Face `transformers` mean-pooling embeddings and `sentence-transformers` embeddings. Preferred RunPod RAG model is `cisco-ai/SecureBERT2.0-biencoder` because it is a cybersecurity sentence-similarity/document-embedding model suited to semantic retrieval.
@@ -274,6 +301,7 @@ Partially implemented or notable limitations:
 - Current external corpus includes ATT&CK Enterprise, CWE, D3FEND, and all 3,295 Sigma rule files from the downloaded Sigma archive.
 - Current `data/rag/chunks.jsonl` has 41,722 chunks.
 - Eval JSONL rows now include compact graph traces for `full_agentic` runs.
+- Graph traces now include RAG top-document metadata, investigation intent, verifier candidate, gate decision/responder details, and final responder action.
 - LLM clients record raw/parsed traces and investigator/verifier fall back deterministically on malformed LLM output.
 
 Relevant files:
@@ -284,6 +312,8 @@ Relevant files:
 - `defender/prompt_guard.py`
 - `defender/graph_state.py`
 - `defender/graph.py`
+- `defender/responder.py`
+- `defender/langgraph_adapter.py`
 - `defender/rag_build.py`
 - `scripts/build_rag_chunks.py`
 - `scripts/build_qdrant_index.py`
@@ -297,7 +327,7 @@ Relevant files:
 Automated tests:
 
 - Command run from `soc_defender`: `py -m pytest -q`
-- Result: `33 passed in 0.72s`
+- Result: `46 passed in 2.01s`
 
 Smoke eval output:
 
@@ -314,8 +344,22 @@ Interpretation:
 
 - The MVP can run end-to-end on at least one train seed.
 - The current smoke result shows useful restraint on false positives, injection behavior, and evidence-gated containment.
-- Attribution and domain/data-target discovery still need more work before the MVP should be treated as calibrated.
-- The latest smoke run produced EGAR `1.0`, no false positives, no injection violations, and missing `attacker_domain`/`data_target`.
+- The latest train standard40 run shows stronger baseline behavior than the qwen2.5:14b reference on report submission, false positives, and injection violations.
+- Attribution and domain/data-target discovery still need more work before calibration should be frozen.
+- The latest train standard40 failure analysis still shows repeated broad queries and attribution gaps, especially `data_target`.
+
+Train calibration run:
+
+- Command: `py -3.13 scripts\eval.py --defender evidence_gate_only --no-rag --split train --tier standard --limit 40 --output outputs\evidence_gate_train_standard40.jsonl --summary outputs\evidence_gate_train_standard40_summary.json`
+- Summary: mean reward `2.36`, report submitted rate `1.0`, correct containment rate `0.45`, false positive rate `0.225`, injection violation rate `0.025`.
+- Failure analysis command: `py -3.13 scripts\analyze_failures.py --input outputs\evidence_gate_train_standard40.jsonl --output outputs\evidence_gate_train_standard40_failures.json`
+- Failure summary: 0 missing reports, 9 false-positive containment runs, 1 injection-violation run, 0 low-EGAR runs, 54 repeated queries, 18 `attacker_domain` gaps, and 31 `data_target` gaps.
+
+Baseline parity:
+
+- `docs/baseline_parity.md` records the current comparison procedure and existing qwen2.5:14b baseline metrics.
+- Existing qwen2.5:14b eval baseline from `../opensec-env/outputs/qwen25_14b_baseline_standard40_summary.json`: mean reward `0.3775`, report submitted rate `0.65`, false positive rate `0.45`, injection violation rate `0.375`.
+- A fresh post-change `full_agentic` eval run is still required because existing full-agentic output predates the current graph wiring.
 
 Git status note:
 
@@ -326,43 +370,41 @@ Git status note:
 | Phase | Status | Notes |
 |---|---|---|
 | Phase 0: Environment Setup | Mostly complete | Scaffold, configs, tests, outputs, package metadata, and placeholder data folders exist. |
-| Phase 1: Eval Harness And Baseline Parity | Partially complete | Local harness and `evidence_gate_only` hook exist. Smoke eval runs with `py -3.13`. Baseline parity documentation and Ollama CLI flags are not complete. |
-| Phase 2: Observation Parser And Evidence Registry | Mostly complete | Parser and registry exist. Extraction is heuristic and scanner annotations are now populated from regex scanning. |
+| Phase 1: Eval Harness And Baseline Parity | Mostly complete | Local harness, `evidence_gate_only`, `full_agentic`, Ollama baseline mode, RAG ablation flag, and baseline parity doc exist. Fresh post-change full-agentic comparison is pending. |
+| Phase 2: Observation Parser And Evidence Registry | Mostly complete | Parser and registry exist. Extraction is heuristic; support ranking and scanner span propagation are implemented. |
 | Phase 3: Action Adapter And SQL Planner | Mostly complete | Central constructors, validation, SQL safety, and planner exist. Harness fallback still allows `SELECT 1` for malformed baseline actions. |
-| Phase 4: Evidence Gate And 15-Step Budget | Mostly complete | Deterministic gate and step-aware policy exist. Budget controller is embedded in policy rather than a separate module. |
-| Phase 5: Report Readiness And `evidence_gate_only` Policy | Mostly complete | Policy is integrated and runs end-to-end. Report attribution remains weak for domain and data target. |
-| Phase 6: Failure Analysis And Calibration | Partially complete | Failure analyzer and initial calibration config exist. Broader train-split tuning is not documented. |
-| Phase 7: Regex Injection Scanner | Partially complete | Regex classifier, scanner wrapper, registry annotations, tests, and eval helper exist. Prompt Guard/LLM localization remain later phases. |
-| Phase 8: Ollama Internal LLM Adapter | Partially complete | `defender/llm.py` exists with Ollama JSON client and mock client. Investigator/verifier structured contracts exist. Eval supports `--agent-llm ollama`; live RunPod URL is needed to exercise it. |
-| Phase 9: RAG Build And Local Qdrant Transfer | Partially complete | RAG retriever interface, builtin fallback, chunk builder, Qdrant build script, and lazy runtime retriever exist. A RunPod-built collection and runtime embedder are still needed for live retrieval. |
-| Phase 10: Prompt Guard 2 And LLM Localization | Partially complete | Prompt Guard fallback and localizer hook exist. Real Prompt Guard 2 model integration remains pending. |
+| Phase 4: Evidence Gate And 15-Step Budget | Mostly complete | Deterministic gate, scanner-span rejection, step-aware policy, and budget module exist. |
+| Phase 5: Report Readiness And `evidence_gate_only` Policy | Mostly complete | Policy is integrated and runs end-to-end. Ranked support is used for report readiness; domain/data-target attribution still needs tuning. |
+| Phase 6: Failure Analysis And Calibration | Partially complete | Failure analyzer exists and train standard40 has been run/analyzed. Calibration thresholds are not frozen. |
+| Phase 7: Regex Injection Scanner | Mostly complete | Regex classifier, scanner wrapper, registry annotations, tests, eval helper, and train-set builder exist. Prompt Guard 2 and localization are connected in `full_agentic`. |
+| Phase 8: Ollama Internal LLM Adapter | Mostly complete | `defender/llm.py` exists with Ollama JSON client and mock client. Investigator/verifier structured contracts exist. Eval supports `--agent-llm ollama` and `--ollama`. Live ablation testing is the next step. |
+| Phase 9: RAG Build And Local Qdrant Transfer | Partially complete / ablated | RAG retriever interface, builtin fallback, chunk builder, Qdrant build script, lazy runtime retriever, `corpus_manifest.json` exclusion, and `--no-rag` ablation switch exist. CPU RAG eval still needs a fresh run because the current manifest points at CUDA. |
+| Phase 10: Prompt Guard 2 And LLM Localization | Mostly complete | Prompt Guard 2 provider is default in `full_agentic`; 22M fallback and long-input windowing exist. Live localization requires Ollama. |
 | Phase 11: LangChain Multi-Provider Layer | Deferred | Provider switching is not implemented; Ollama remains the required path. |
-| Phase 12: LangGraph Full-Agentic Orchestration | Partially complete | Graph state and plain-Python node scaffold exist. True LangGraph runtime dependency is not wired yet. |
+| Phase 12: LangGraph Full-Agentic Orchestration | Mostly complete | Graph state, plain-Python node scaffold, verifier-to-responder action path, and optional `--use-langgraph` adapter exist. LangGraph dependency remains optional. |
 
 ## Remaining Work
 
 Highest-priority MVP work:
 
-1. Improve attribution extraction and ranking, especially `data_target` and later-stage domain evidence under different attacker paths.
-2. Add broader train-split eval runs and record results in `outputs/`.
-3. Use `scripts/analyze_failures.py` to calibrate on train outputs and update `configs/calibration.yaml`.
-4. Document baseline parity or differences against upstream OpenSec.
-5. Align eval CLI with the phase plan by adding Ollama/base URL support or updating the plan if that is deferred.
-6. Add focused tests for gate rejection cases, report readiness, and end-to-end policy trajectories.
+1. Tune and freeze `configs/calibration.yaml` using train-only results. Current train standard40 output is available, but thresholds were not changed yet.
+2. Improve attribution extraction for `data_target` and `attacker_domain`; these remain the dominant train standard40 report gaps.
+3. Reduce repeated broad queries after useful evidence has already been gathered.
+4. Add golden train regression tests for fixed seeds and final-step report behavior.
+5. Add fallback-policy and automated baseline-parity tests.
 
 Full-agentic work still pending:
 
-1. Exercise live Ollama investigator/verifier/localizer calls on RunPod and inspect graph traces.
-2. Build the RAG corpus pipeline on RunPod GPU and transfer the local Qdrant DB.
-3. Add real Prompt Guard 2 inference after the regex scanner.
-4. Replace or wrap the plain-Python graph scaffold with LangGraph when that dependency is introduced.
+1. Run a fresh post-change `full_agentic --no-rag --split eval --tier standard --limit 40` comparison against the qwen2.5:14b baseline.
+2. Run a CPU RAG smoke/eval path, or rebuild/update the local RAG manifest so it does not request CUDA on a CPU-only Torch build.
+3. Exercise live Ollama investigator/verifier/localizer calls on RunPod and inspect graph traces.
+4. Exercise optional LangGraph adapter once `langgraph` is installed.
 5. Keep OpenSec mutation behind a single final commit boundary.
 
 ## Key Risks
 
 - Current report attribution can look complete while still being semantically wrong.
-- Domain extraction is safer now, but entity ranking is still heuristic and should be calibrated across the train split.
-- The latest smoke output has EGAR `1.0`, but train-10 still shows containment and attribution gaps that need later calibration.
-- The MVP has been smoke-tested on one seed in the checked smoke output and train-tested on 10 seeds through `outputs/llm_baselines*.json`.
-- Scanner-related gate logic now has regex scanner input, but real Prompt Guard 2 is not implemented.
-- LLM/RAG/graph interfaces exist, but live model and production vector retrieval paths still need environment-specific wiring.
+- Domain extraction and entity ranking are safer now, but train standard40 still shows 18 `attacker_domain` gaps and 31 `data_target` gaps.
+- The deterministic train standard40 run has low injection violation rate and no low-EGAR runs, but 9 false-positive containment runs remain.
+- The local RAG manifest can request CUDA; use `--no-rag` for deterministic MVP runs on CPU-only Torch or rebuild/update the manifest for CPU.
+- LLM/RAG/graph interfaces exist and are wired, but live full-agentic model behavior still needs fresh post-change eval evidence.

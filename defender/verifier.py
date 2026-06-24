@@ -40,6 +40,6 @@ def gate_containment(
     malicious = tuple(s for s in trusted if s.malicious_indicators)
     if not malicious:
         return GateDecision(False, "support does not imply malicious behavior")
-    if all(s.scanner_status in {"flagged", "localized"} for s in malicious):
+    if all(s.scanner_status in {"flagged", "localized"} or s.localized_spans for s in malicious):
         return GateDecision(False, "support only appears in flagged scanner spans")
     return GateDecision(True, "approved", malicious)

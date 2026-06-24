@@ -19,6 +19,8 @@ class LLMTrace:
     raw_text: str = ""
     parsed: dict[str, Any] | None = None
     error: str | None = None
+    messages: list[dict[str, str]] = field(default_factory=list)
+    schema_hint: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -57,12 +59,12 @@ class OllamaLLMClient:
             repaired_text = self._complete_text(repair_prompt)
             try:
                 parsed = extract_json_object(repaired_text)
-                self.traces.append(LLMTrace("ollama", raw_text=repaired_text, parsed=parsed))
+                self.traces.append(LLMTrace("ollama", raw_text=repaired_text, parsed=parsed, messages=messages, schema_hint=schema_hint))
                 return parsed
             except Exception as second_error:
-                self.traces.append(LLMTrace("ollama", raw_text=repaired_text, error=str(second_error)))
+                self.traces.append(LLMTrace("ollama", raw_text=repaired_text, error=str(second_error), messages=messages, schema_hint=schema_hint))
                 raise
-        self.traces.append(LLMTrace("ollama", raw_text=text, parsed=parsed))
+        self.traces.append(LLMTrace("ollama", raw_text=text, parsed=parsed, messages=messages, schema_hint=schema_hint))
         return parsed
 
     def _complete_text(self, prompt: str) -> str:
@@ -96,7 +98,7 @@ class StaticJSONLLMClient:
 
     def complete_json(self, messages: list[dict[str, str]], schema_hint: dict[str, Any] | None = None) -> dict[str, Any]:
         parsed = dict(self.response)
-        self.traces.append(LLMTrace("static", raw_text=json.dumps(parsed), parsed=parsed))
+        self.traces.append(LLMTrace("static", raw_text=json.dumps(parsed), parsed=parsed, messages=list(messages), schema_hint=schema_hint))
         return parsed
 
 

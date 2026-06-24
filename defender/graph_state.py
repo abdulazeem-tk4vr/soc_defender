@@ -17,6 +17,7 @@ class DefenderGraphState:
     open_sec_step_index: int = 0
     max_steps: int = 15
     observation: dict[str, Any] = field(default_factory=dict)
+    parsed_observation: Any | None = None
     scanner_annotations: list[dict[str, Any]] = field(default_factory=list)
     rag_context: list[dict[str, Any]] = field(default_factory=list)
     investigation_intent: dict[str, Any] = field(default_factory=dict)

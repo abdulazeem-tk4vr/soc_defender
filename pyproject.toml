@@ -23,6 +23,9 @@ agentic = [
   "uvicorn",
   "qdrant-client",
   "transformers",
+  "sentence-transformers",
+  "torch",
+  "langgraph",
 ]
 
 [tool.setuptools.packages.find]

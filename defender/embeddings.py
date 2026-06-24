@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import time
+from typing import Any
 
 
 def log(message: str) -> None:
@@ -73,3 +74,14 @@ class HuggingFaceTransformerEmbedder:
         vectors = summed / counts
         vectors = self.torch.nn.functional.normalize(vectors, p=2, dim=1)
         return vectors.detach().cpu().tolist()
+
+
+def build_embedder_from_manifest(manifest: dict[str, Any], device: str | None = None):
+    backend = str(manifest.get("embedding_backend") or "transformers")
+    model = str(manifest.get("embedding_model") or "ehsanaghaei/SecureBERT")
+    max_length = int(manifest.get("max_length") or 512)
+    if backend == "sentence-transformers":
+        return SentenceTransformerEmbedder(model, device=device or manifest.get("device"))
+    if backend == "transformers":
+        return HuggingFaceTransformerEmbedder(model, device=device or manifest.get("device"), max_length=max_length)
+    raise ValueError(f"Unsupported embedding backend in manifest: {backend}")

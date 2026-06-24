@@ -48,9 +48,7 @@ class ReportReadinessTracker:
     @staticmethod
     def _first_with_indicator(registry: EvidenceRegistry, entity_type: str, preferred: set[str]) -> str | None:
         fallback = None
-        for support in registry.supports:
-            if support.entity_type != entity_type or not support.trusted or not support.content_exposed:
-                continue
+        for support in registry.ranked_supports(entity_type):
             if fallback is None:
                 fallback = support.entity_value
             if preferred.intersection(support.malicious_indicators):

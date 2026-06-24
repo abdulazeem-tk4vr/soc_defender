@@ -44,6 +44,7 @@ class EntitySupport:
     supporting_fields: tuple[str, ...] = ()
     malicious_indicators: tuple[str, ...] = ()
     scanner_status: str = "unknown"
+    localized_spans: tuple[Any, ...] = ()
 
     @property
     def trusted(self) -> bool:
@@ -154,6 +155,7 @@ class EvidenceRegistry:
                 supporting_fields=fields,
                 malicious_indicators=indicators,
                 scanner_status=scan.status,
+                localized_spans=scan.localized_spans,
             )
             if support not in self.supports:
                 self.supports.append(support)
@@ -167,9 +169,33 @@ class EvidenceRegistry:
 
     def best_entities(self, entity_type: str) -> list[str]:
         seen: list[str] = []
-        for support in self.supports:
-            if support.entity_type != entity_type:
-                continue
-            if support.entity_value not in seen and support.trusted and support.content_exposed:
+        for support in self.ranked_supports(entity_type):
+            if support.entity_value not in seen:
                 seen.append(support.entity_value)
         return seen
+
+    def ranked_supports(self, entity_type: str) -> list[EntitySupport]:
+        supports = [
+            support
+            for support in self.supports
+            if support.entity_type == entity_type and support.trusted and support.content_exposed
+        ]
+        return sorted(supports, key=self._support_rank, reverse=True)
+
+    @staticmethod
+    def _support_rank(support: EntitySupport) -> tuple[int, int, int, int]:
+        trust_score = {"verified": 3, "trusted": 2, None: 1}.get(support.trust_tier, 1)
+        source_score = {
+            ("domain", "netflow"): 5,
+            ("target", "process_events"): 5,
+            ("target", "alerts"): 4,
+            ("host", "alerts"): 4,
+            ("host", "auth_logs"): 3,
+            ("user", "auth_logs"): 4,
+            ("user", "email_logs"): 3,
+            ("domain", "alerts"): 3,
+            ("domain", "email_logs"): 2,
+        }.get((support.entity_type, support.source_table), 1)
+        indicator_score = min(5, len(support.malicious_indicators))
+        field_score = min(3, len(support.supporting_fields))
+        return (trust_score, source_score, indicator_score, field_score)

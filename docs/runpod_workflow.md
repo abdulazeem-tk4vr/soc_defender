@@ -45,10 +45,40 @@ Run the full-agentic scaffold with live Ollama-backed investigator/verifier/loca
 py -3.13 scripts\eval.py --defender full_agentic --agent-llm ollama --split train --limit 1 --output outputs\full_agentic_ollama_eval.jsonl --summary outputs\full_agentic_ollama_summary.json
 ```
 
+For baseline comparison with the same RunPod Ollama model:
+
+```powershell
+py -3.13 scripts\eval.py --defender baseline --ollama --split train --limit 1 --output outputs\baseline_ollama_eval.jsonl --summary outputs\baseline_ollama_summary.json
+```
+
+For full-agentic ablation runs that keep the scanner, Prompt Guard 2, investigator, verifier, graph trace, and Ollama calls active but disable Qdrant/RAG retrieval, pass `--no-rag`:
+
+```powershell
+py -3.13 scripts\eval.py --defender full_agentic --ollama --no-rag --split train --limit 1 --output outputs\full_agentic_no_rag_eval.jsonl --summary outputs\full_agentic_no_rag_summary.json
+```
+
+Prompt Guard 2 is enabled by default in `full_agentic` mode with:
+
+```text
+meta-llama/Prompt-Guard-86M
+```
+
+Disable it only for debugging:
+
+```powershell
+py -3.13 scripts\eval.py --defender full_agentic --prompt-guard2-model none --split train --limit 1
+```
+
 You can also pass the URL directly:
 
 ```powershell
 py -3.13 scripts\eval.py --defender full_agentic --agent-llm ollama --base-url https://your-runpod-proxy-url --ollama-model llama3.2:3b --split train --limit 1
+```
+
+When `data/rag/qdrant/build_manifest.json` exists locally, eval auto-loads the Qdrant RAG index unless `--no-rag` is passed. You can also pass it explicitly:
+
+```powershell
+py -3.13 scripts\eval.py --defender full_agentic --agent-llm ollama --rag-path data\rag\qdrant --rag-device cuda --split train --limit 1
 ```
 
 ## RunPod RAG Embedding Build
@@ -80,6 +110,14 @@ python scripts/build_qdrant_index.py --chunks data/rag/chunks.jsonl --embedding-
 ```
 
 The script embeds chunks in batches, writes a local Qdrant collection, and stores `data/rag/qdrant/build_manifest.json`.
+
+After the build finishes, package the index for download:
+
+```bash
+tar -czf data/rag/qdrant_index.tar.gz -C data/rag qdrant
+```
+
+Copy `qdrant_index.tar.gz` back locally and extract it under `soc_defender/data/rag/`, so the final path is `soc_defender/data/rag/qdrant/build_manifest.json`.
 
 Fallback options:
 

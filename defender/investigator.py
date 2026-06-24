@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -15,6 +16,8 @@ class InvestigationIntent:
     entity_value: str | None = None
     rationale: str = ""
     confidence: float = 0.0
+    evidence_summary: str = ""
+    uncertainty: str = ""
 
 
 @dataclass
@@ -26,6 +29,9 @@ class Investigator:
         observation: dict[str, Any],
         registry: EvidenceRegistry,
         report_tracker: ReportReadinessTracker,
+        rag_context: list[dict[str, Any]] | None = None,
+        scanner_annotations: list[dict[str, Any]] | None = None,
+        budget_state: dict[str, Any] | None = None,
     ) -> InvestigationIntent:
         if self.llm is None:
             return self._deterministic_intent(registry, report_tracker)
@@ -33,7 +39,17 @@ class Investigator:
             response = self.llm.complete_json(
                 [
                     {"role": "system", "content": "You are an SOC evidence investigator. Output investigation intent only."},
-                    {"role": "user", "content": self._state_summary(observation, registry, report_tracker)},
+                    {
+                        "role": "user",
+                        "content": self._state_summary(
+                            observation,
+                            registry,
+                            report_tracker,
+                            rag_context=rag_context,
+                            scanner_annotations=scanner_annotations,
+                            budget_state=budget_state,
+                        ),
+                    },
                 ],
                 schema_hint={
                     "intent_type": "query_logs|fetch_alert|fetch_email|wait",
@@ -41,6 +57,8 @@ class Investigator:
                     "entity_value": "string|null",
                     "rationale": "string",
                     "confidence": 0.0,
+                    "evidence_summary": "string",
+                    "uncertainty": "string",
                 },
             )
             return self._intent_from_response(response)
@@ -61,6 +79,8 @@ class Investigator:
             entity_value=response.get("entity_value"),
             rationale=str(response.get("rationale") or ""),
             confidence=max(0.0, min(1.0, float(response.get("confidence") or 0.0))),
+            evidence_summary=str(response.get("evidence_summary") or ""),
+            uncertainty=str(response.get("uncertainty") or ""),
         )
 
     @staticmethod
@@ -78,6 +98,9 @@ class Investigator:
         observation: dict[str, Any],
         registry: EvidenceRegistry,
         report_tracker: ReportReadinessTracker,
+        rag_context: list[dict[str, Any]] | None = None,
+        scanner_annotations: list[dict[str, Any]] | None = None,
+        budget_state: dict[str, Any] | None = None,
     ) -> str:
         supports = [
             {
@@ -89,13 +112,17 @@ class Investigator:
             }
             for support in registry.supports[-20:]
         ]
-        return str(
+        return json.dumps(
             {
                 "step_index": observation.get("step_index"),
+                "attacker_state": observation.get("attacker_state"),
                 "new_alerts": observation.get("new_alerts"),
                 "new_emails": observation.get("new_emails"),
                 "report_values": report_tracker.values,
                 "recent_support": supports,
+                "rag_context": rag_context or [],
+                "scanner_annotations": scanner_annotations or [],
+                "budget": budget_state or {},
             }
         )
 
@@ -118,6 +145,8 @@ class LLMVerifier:
         registry: EvidenceRegistry,
         report_tracker: ReportReadinessTracker,
         budget_state: dict[str, Any],
+        rag_context: list[dict[str, Any]] | None = None,
+        scanner_annotations: list[dict[str, Any]] | None = None,
     ) -> VerifierCandidate:
         if self.llm is None:
             return VerifierCandidate("investigate", intent.entity_value, intent.rationale, intent.confidence)
@@ -132,6 +161,8 @@ class LLMVerifier:
                                 "intent": intent,
                                 "report_values": report_tracker.values,
                                 "budget": budget_state,
+                                "rag_context": rag_context or [],
+                                "scanner_annotations": scanner_annotations or [],
                                 "entities": {kind: registry.best_entities(kind) for kind in ("host", "user", "domain", "target")},
                             }
                         ),

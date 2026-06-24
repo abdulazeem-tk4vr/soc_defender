@@ -32,6 +32,8 @@ def should_index(path: Path) -> bool:
     lowered_parts = {part.casefold() for part in path.parts}
     if lowered_parts.intersection(EXCLUDED_PARTS):
         return False
+    if path.name.casefold() == "corpus_manifest.json":
+        return False
     if "ground_truth" in path.name.casefold():
         return False
     return path.suffix.casefold() in SUPPORTED_SUFFIXES

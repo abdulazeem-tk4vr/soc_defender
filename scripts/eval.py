@@ -12,6 +12,8 @@ from typing import Any, Dict, List
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OPENSEC_ROOT = ROOT.parent / "opensec-env"
 # added code for compatibility: allow this sibling harness to import OpenSec.
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 if str(DEFAULT_OPENSEC_ROOT) not in sys.path:
     sys.path.insert(0, str(DEFAULT_OPENSEC_ROOT))
 
@@ -21,6 +23,8 @@ import yaml
 from openai import OpenAI, BadRequestError
 
 from defender.agent import build_agent  # added code for compatibility: soc_defender agent hook.
+from defender.prompt_guard import DEFAULT_PROMPT_GUARD2_MODEL
+from defender.rag import build_rag_intel
 from eval_utils import extract_json, injection_evidence_ids, load_env, load_json
 from oracle.calibration import (
     EvidenceExtraction,
@@ -42,6 +46,7 @@ ALLOWED_ACTIONS = [
     "reset_user",
     "submit_report",
 ]
+SAFE_FALLBACK_SQL = "SELECT * FROM alerts ORDER BY step DESC LIMIT 20"
 
 
 def _load_yaml(path: Path) -> Dict[str, Any]:
@@ -56,7 +61,7 @@ def _normalize_action(data: Dict[str, Any]) -> AgentAction:
     params = data.get("params") if isinstance(data, dict) and isinstance(data.get("params"), dict) else {}
 
     if action_type == "query_logs" and "sql" not in params:
-        params["sql"] = "SELECT 1"
+        params["sql"] = SAFE_FALLBACK_SQL
     if action_type == "fetch_email" and "email_id" not in params:
         params["email_id"] = ""
     if action_type == "fetch_alert" and "alert_id" not in params:
@@ -110,6 +115,22 @@ def _call_openrouter(model: str, messages: List[Dict[str, str]], temperature: fl
     return data["choices"][0]["message"]["content"]
 
 
+def _call_ollama(model: str, messages: List[Dict[str, str]], temperature: float, max_tokens: int) -> str:
+    base_url = os.getenv("OLLAMA_BASE_URL")
+    if not base_url:
+        raise RuntimeError("OLLAMA_BASE_URL is not set")
+    prompt = "\n\n".join(f"{message.get('role', 'user').upper()}:\n{message.get('content', '')}" for message in messages)
+    payload = {
+        "model": model,
+        "prompt": prompt,
+        "stream": False,
+        "options": {"temperature": temperature, "num_predict": max_tokens},
+    }
+    resp = requests.post(f"{base_url.rstrip('/')}/api/generate", json=payload, timeout=float(os.getenv("OLLAMA_TIMEOUT", "60")))
+    resp.raise_for_status()
+    return str(resp.json().get("response", ""))
+
+
 def _invoke_model(model_cfg: Dict[str, Any], messages: List[Dict[str, str]]) -> tuple[str, Dict[str, Any]]:
 
     provider = model_cfg["provider"]
@@ -120,13 +141,15 @@ def _invoke_model(model_cfg: Dict[str, Any], messages: List[Dict[str, str]]) -> 
         text = _call_openai(model_cfg["name"], messages, temperature, max_tokens)
     elif provider == "openrouter":
         text = _call_openrouter(model_cfg["name"], messages, temperature, max_tokens)
+    elif provider == "ollama":
+        text = _call_ollama(model_cfg["name"], messages, temperature, max_tokens)
     else:
         raise ValueError(f"Unknown provider: {provider}")
 
     try:
         return text, extract_json(text)
     except Exception:
-        return text, {"action_type": "query_logs", "params": {"sql": "SELECT 1"}}
+        return text, {"action_type": "query_logs", "params": {"sql": SAFE_FALLBACK_SQL}}
 
 
 def _default_report() -> Dict[str, Any]:
@@ -146,6 +169,10 @@ def run_episode(
     max_steps: int,
     defender: str = "baseline",
     agent_llm: str = "none",
+    rag_path: str = "",
+    rag_device: str = "",
+    prompt_guard2_model: str = "",
+    use_langgraph: bool = False,
 ) -> Dict[str, Any]:
     env = OpenSecEnvironment(seed_path=str(seed_path))
     reset_result = env.reset()
@@ -157,7 +184,19 @@ def run_episode(
     # Collect known entities for EGAR evidence tracking
     known_entities = collect_known_entities(env.scenario) if env.scenario else set()
     # added code for compatibility: build soc_defender agent only for defender modes.
-    agent = build_agent(defender, episode_max_steps, agent_llm=agent_llm) if defender != "baseline" else None
+    rag = build_rag_intel(rag_path, device=rag_device or None) if rag_path else None
+    agent = (
+        build_agent(
+            defender,
+            episode_max_steps,
+            agent_llm=agent_llm,
+            rag=rag,
+            prompt_guard2_model=prompt_guard2_model or None,
+            use_langgraph=use_langgraph,
+        )
+        if defender != "baseline"
+        else None
+    )
 
     messages: List[Dict[str, str]] = [
         {"role": "system", "content": build_system_prompt(max_steps=episode_max_steps)}
@@ -283,7 +322,12 @@ def main() -> int:
     parser.add_argument("--config", default="configs/baselines.yaml")
     parser.add_argument("--manifest", default="data/seeds/manifest.json")
     parser.add_argument("--split", default="eval", choices=["train", "eval"])
-    parser.add_argument("--tier", default=None, choices=["trivial", "easy", "standard"])
+    parser.add_argument(
+        "--tier",
+        default=None,
+        choices=["trivial", "easy", "standard", "adaptive", "direct_harm", "data_exfil"],
+        help="'standard' is an alias for adaptive, direct_harm, and data_exfil seeds",
+    )
     parser.add_argument("--models", default="", help="Comma-separated model names to run (subset)")
     parser.add_argument("--skip", type=int, default=0, help="Skip first N seeds (for batching)")
     parser.add_argument("--limit", type=int, default=10)
@@ -291,8 +335,18 @@ def main() -> int:
     # added code for compatibility: switch between OpenSec baseline and soc_defender agent.
     parser.add_argument("--defender", default="baseline", choices=["baseline", "evidence_gate_only", "full_agentic"])
     parser.add_argument("--agent-llm", default="none", choices=["none", "ollama"], help="Optional internal LLM backend for full_agentic mode")
+    parser.add_argument("--ollama", action="store_true", help="Shortcut for --agent-llm ollama")
     parser.add_argument("--base-url", default="", help="Override OLLAMA_BASE_URL for --agent-llm ollama")
     parser.add_argument("--ollama-model", default="", help="Override OLLAMA_MODEL for --agent-llm ollama")
+    parser.add_argument("--rag-path", default="", help="Optional local Qdrant path, e.g. data/rag/qdrant")
+    parser.add_argument("--no-rag", action="store_true", help="Disable RAG retrieval and Qdrant auto-load for ablations")
+    parser.add_argument("--rag-device", default="", help="Optional RAG embedder device, e.g. cuda or cpu")
+    parser.add_argument("--use-langgraph", action="store_true", help="Run full_agentic through the optional LangGraph adapter")
+    parser.add_argument(
+        "--prompt-guard2-model",
+        default=DEFAULT_PROMPT_GUARD2_MODEL,
+        help="Hugging Face Prompt Guard 2 model name; pass 'none' to disable",
+    )
     parser.add_argument("--output", default="outputs/llm_baselines.jsonl")
     parser.add_argument("--summary", default="outputs/llm_baselines_summary.json")
     args = parser.parse_args()
@@ -303,13 +357,28 @@ def main() -> int:
         sys.path.insert(0, str(opensec_root))
     os.chdir(opensec_root)
     load_env(str(ROOT / ".env"))
+    if args.ollama:
+        args.agent_llm = "ollama"
     if args.base_url:
         os.environ["OLLAMA_BASE_URL"] = args.base_url
     if args.ollama_model:
         os.environ["OLLAMA_MODEL"] = args.ollama_model
+    if args.no_rag:
+        args.rag_path = ""
+    elif not args.rag_path and (ROOT / "data" / "rag" / "qdrant" / "build_manifest.json").exists():
+        args.rag_path = str(ROOT / "data" / "rag" / "qdrant")
 
     if args.defender != "baseline":
         model_list = [{"name": args.defender, "provider": "agent"}]
+    elif args.ollama:
+        model_list = [
+            {
+                "name": os.getenv("OLLAMA_MODEL", "llama3.2:3b"),
+                "provider": "ollama",
+                "temperature": float(os.getenv("OLLAMA_TEMPERATURE", "0.2")),
+                "max_tokens": 600,
+            }
+        ]
     else:
         config = _load_yaml(Path(args.config))
         model_list = config.get("models", [])
@@ -320,12 +389,21 @@ def main() -> int:
     manifest = load_json(Path(args.manifest))
     seeds = manifest[args.split]
     if args.tier:
-        seeds = [entry for entry in seeds if entry.get("tier") == args.tier]
+        if args.tier == "standard":
+            seeds = [entry for entry in seeds if entry.get("tier") in {"adaptive", "direct_harm", "data_exfil"}]
+        else:
+            seeds = [entry for entry in seeds if entry.get("tier") == args.tier]
     seeds = [Path(entry["seed_path"]) for entry in seeds]
     if args.skip:
         seeds = seeds[args.skip:]
     if args.limit:
         seeds = seeds[: args.limit]
+    if not seeds:
+        available = sorted({str(entry.get("tier")) for entry in manifest[args.split]})
+        raise SystemExit(
+            f"No seeds selected for split={args.split!r} tier={args.tier!r}. "
+            f"Available tiers in this split: {', '.join(available)}"
+        )
 
     output_path = Path(args.output)
     if not output_path.is_absolute():
@@ -338,6 +416,13 @@ def main() -> int:
 
     summary: Dict[str, Any] = {}
 
+    print(
+        f"Running defender={args.defender} models={len(model_list)} split={args.split} "
+        f"tier={args.tier or 'all'} seeds={len(seeds)} max_steps={args.max_steps} "
+        f"rag={'off' if not args.rag_path else args.rag_path}",
+        flush=True,
+    )
+
     with output_path.open("w") as f:
         for model_cfg in model_list:
             rewards: List[float] = []
@@ -348,7 +433,18 @@ def main() -> int:
             injection_exposure_count = 0
             injection_violation_count = 0
             for idx, seed_path in enumerate(seeds, start=1):
-                result = run_episode(seed_path, model_cfg, args.max_steps, args.defender, agent_llm=args.agent_llm)
+                print(f"Starting [{idx}/{len(seeds)}] {model_cfg['name']} {seed_path.name}", flush=True)
+                result = run_episode(
+                    seed_path,
+                    model_cfg,
+                    args.max_steps,
+                    args.defender,
+                    agent_llm=args.agent_llm,
+                    rag_path=args.rag_path,
+                    rag_device=args.rag_device,
+                    prompt_guard2_model=None if args.prompt_guard2_model == "none" else args.prompt_guard2_model,
+                    use_langgraph=args.use_langgraph,
+                )
                 gt_path = seed_path.with_name(seed_path.name.replace("_seed.json", "_ground_truth.json"))
                 ground_truth = load_json(gt_path)
                 score = score_report(

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
 from pathlib import Path
 from typing import Protocol
+
+from .embeddings import build_embedder_from_manifest
 
 
 @dataclass(frozen=True)
@@ -44,17 +47,21 @@ class QdrantRAGRetriever(RAGRetriever):
     path: Path
     collection_name: str = "soc_defender_intel"
     embedder: TextEmbedder | None = None
+    client: object | None = None
 
     def retrieve(self, query: str, limit: int = 5) -> tuple[RAGDocument, ...]:
         if self.embedder is None:
             raise RuntimeError("QdrantRAGRetriever requires an embedder for query vectors")
-        try:
-            from qdrant_client import QdrantClient
-        except ImportError as exc:
-            raise RuntimeError("qdrant-client is required for Qdrant retrieval") from exc
 
         vector = self.embedder.embed([query])[0]
-        client = QdrantClient(path=str(self.path))
+        if self.client is None:
+            try:
+                from qdrant_client import QdrantClient
+            except ImportError as exc:
+                raise RuntimeError("qdrant-client is required for Qdrant retrieval") from exc
+            client = QdrantClient(path=str(self.path))
+        else:
+            client = self.client
         hits = client.search(collection_name=self.collection_name, query_vector=vector, limit=limit)
         docs: list[RAGDocument] = []
         for hit in hits:
@@ -87,7 +94,22 @@ class RAGIntel:
         return self.retriever.retrieve(query, limit=limit)
 
 
-def build_rag_intel(qdrant_path: str | Path | None = None, embedder: TextEmbedder | None = None) -> RAGIntel:
-    if qdrant_path and Path(qdrant_path).exists() and embedder is not None:
-        return RAGIntel(QdrantRAGRetriever(Path(qdrant_path), embedder=embedder))
+def build_rag_intel(
+    qdrant_path: str | Path | None = None,
+    embedder: TextEmbedder | None = None,
+    device: str | None = None,
+) -> RAGIntel:
+    if qdrant_path and Path(qdrant_path).exists():
+        path = Path(qdrant_path)
+        manifest_path = path / "build_manifest.json"
+        if not manifest_path.exists():
+            return RAGIntel()
+        resolved_embedder = embedder
+        if resolved_embedder is None:
+            manifest = json.loads(manifest_path.read_text())
+            resolved_embedder = build_embedder_from_manifest(manifest, device=device)
+        if resolved_embedder is not None:
+            manifest_collection = "soc_defender_intel"
+            manifest_collection = str(json.loads(manifest_path.read_text()).get("collection") or manifest_collection)
+            return RAGIntel(QdrantRAGRetriever(path, collection_name=manifest_collection, embedder=resolved_embedder))
     return RAGIntel()
