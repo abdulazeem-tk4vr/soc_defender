@@ -1,6 +1,5 @@
 from defender import SocDefenderAgent, build_agent
 from defender.llm import StaticJSONLLMClient
-from defender.prompt_guard import DEFAULT_PROMPT_GUARD2_MODEL
 
 
 def test_soc_defender_agent_emits_direct_action_from_observation():
@@ -77,10 +76,10 @@ def test_full_agentic_accepts_mock_llm_client():
     assert action["action_type"] == "query_logs"
 
 
-def test_full_agentic_defaults_prompt_guard2_model():
+def test_full_agentic_disables_prompt_guard2_by_default():
     agent = SocDefenderAgent(mode="full_agentic", max_steps=15)
 
-    assert agent.prompt_guard2_model == DEFAULT_PROMPT_GUARD2_MODEL
+    assert agent.prompt_guard2_model is None
 
 
 def test_build_agent_accepts_optional_langgraph_flag():

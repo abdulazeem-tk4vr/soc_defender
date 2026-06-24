@@ -31,6 +31,10 @@ def build_langgraph(defender_graph: DefenderGraph):
         defender_graph._registry_node(state["graph_state"])
         return state
 
+    def rag_query_node(state: dict[str, Any]) -> dict[str, Any]:
+        defender_graph._rag_query_node(state["graph_state"])
+        return state
+
     def rag_node(state: dict[str, Any]) -> dict[str, Any]:
         defender_graph._rag_node(state["graph_state"])
         return state
@@ -53,6 +57,7 @@ def build_langgraph(defender_graph: DefenderGraph):
 
     graph.add_node("scanner", scanner_node)
     graph.add_node("registry", registry_node)
+    graph.add_node("rag_query", rag_query_node)
     graph.add_node("rag", rag_node)
     graph.add_node("investigator", investigator_node)
     graph.add_node("budget", budget_node)
@@ -60,7 +65,8 @@ def build_langgraph(defender_graph: DefenderGraph):
     graph.add_node("responder", responder_node)
     graph.set_entry_point("scanner")
     graph.add_edge("scanner", "registry")
-    graph.add_edge("registry", "rag")
+    graph.add_edge("registry", "rag_query")
+    graph.add_edge("rag_query", "rag")
     graph.add_edge("rag", "budget")
     graph.add_edge("budget", "investigator")
     graph.add_edge("investigator", "verifier")

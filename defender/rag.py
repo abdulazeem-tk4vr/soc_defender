@@ -62,7 +62,11 @@ class QdrantRAGRetriever(RAGRetriever):
             client = QdrantClient(path=str(self.path))
         else:
             client = self.client
-        hits = client.search(collection_name=self.collection_name, query_vector=vector, limit=limit)
+        if hasattr(client, "search"):
+            hits = client.search(collection_name=self.collection_name, query_vector=vector, limit=limit)
+        else:
+            response = client.query_points(collection_name=self.collection_name, query=vector, limit=limit)
+            hits = getattr(response, "points", response)
         docs: list[RAGDocument] = []
         for hit in hits:
             payload = hit.payload or {}

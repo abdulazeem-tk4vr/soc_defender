@@ -9,6 +9,7 @@ from .investigator import InvestigationIntent, Investigator, LLMVerifier, Verifi
 from .observation import parse_observation
 from .policy import DefenderPolicy
 from .rag import RAGIntel
+from .rag_query import RAGQueryPlanner
 from .responder import Responder, action_payload, verified_candidate_payload
 from .scanner import InjectionScanner
 
@@ -18,6 +19,7 @@ class DefenderGraph:
     policy: DefenderPolicy = field(default_factory=DefenderPolicy)
     scanner: InjectionScanner = field(default_factory=InjectionScanner)
     rag: RAGIntel = field(default_factory=RAGIntel)
+    rag_query_planner: RAGQueryPlanner = field(default_factory=RAGQueryPlanner)
     investigator: Investigator = field(default_factory=Investigator)
     verifier: LLMVerifier = field(default_factory=LLMVerifier)
 
@@ -31,6 +33,7 @@ class DefenderGraph:
         state.parsed_observation = parse_observation(observation)
         self._scanner_node(state)
         self._registry_node(state)
+        self._rag_query_node(state)
         self._rag_node(state)
         self._budget_node(state)
         self._investigator_node(state)
@@ -72,23 +75,24 @@ class DefenderGraph:
             },
         )
 
-    def _rag_node(self, state: DefenderGraphState) -> None:
-        parsed = state.parsed_observation or parse_observation(state.observation)
-        report_gaps = [key for key, value in self.policy.report_tracker.values.items() if value == "unknown"]
-        entity_terms = []
-        for kind in ("host", "user", "domain", "target"):
-            entity_terms.extend(self.policy.registry.best_entities(kind)[:3])
-        query = " ".join(
-            str(value)
-            for value in [
-                "soc investigation",
-                f"step {parsed.step_index}",
-                parsed.attacker_state,
-                "missing report fields " + " ".join(report_gaps),
-                " ".join(entity_terms),
-            ]
-            if value
+    def _rag_query_node(self, state: DefenderGraphState) -> None:
+        plan = self.rag_query_planner.plan(state.observation, self.policy.registry, self.policy.report_tracker)
+        state.rag_query = plan.query
+        state.append_trace(
+            "rag_query",
+            {
+                "query": plan.query,
+                "source": plan.source,
+                "rationale": plan.rationale,
+            },
         )
+
+    def _rag_node(self, state: DefenderGraphState) -> None:
+        query = state.rag_query or self.rag_query_planner.plan(
+            state.observation,
+            self.policy.registry,
+            self.policy.report_tracker,
+        ).query
         docs = self.rag.context_for(query)
         state.rag_context = [asdict(doc) for doc in docs]
         state.append_trace(

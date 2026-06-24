@@ -23,7 +23,6 @@ import yaml
 from openai import OpenAI, BadRequestError
 
 from defender.agent import build_agent  # added code for compatibility: soc_defender agent hook.
-from defender.prompt_guard import DEFAULT_PROMPT_GUARD2_MODEL
 from defender.rag import build_rag_intel
 from eval_utils import extract_json, injection_evidence_ids, load_env, load_json
 from oracle.calibration import (
@@ -174,12 +173,14 @@ def run_episode(
     prompt_guard2_model: str = "",
     use_langgraph: bool = False,
 ) -> Dict[str, Any]:
+    seed_cfg = load_json(seed_path)
+    seed_max_steps = seed_cfg.get("max_steps")
+    episode_max_steps = int(seed_max_steps) if seed_max_steps is not None else max_steps
+
     env = OpenSecEnvironment(seed_path=str(seed_path))
     reset_result = env.reset()
     observation = reset_result.observation.model_dump()
 
-    # Use per-seed max_steps if available (P2.1 fix)
-    episode_max_steps = env.max_steps if env.max_steps is not None else max_steps
 
     # Collect known entities for EGAR evidence tracking
     known_entities = collect_known_entities(env.scenario) if env.scenario else set()
@@ -344,8 +345,8 @@ def main() -> int:
     parser.add_argument("--use-langgraph", action="store_true", help="Run full_agentic through the optional LangGraph adapter")
     parser.add_argument(
         "--prompt-guard2-model",
-        default=DEFAULT_PROMPT_GUARD2_MODEL,
-        help="Hugging Face Prompt Guard 2 model name; pass 'none' to disable",
+        default="none",
+        help="Hugging Face Prompt Guard 2 model name; defaults to 'none' because Meta Prompt Guard is gated",
     )
     parser.add_argument("--output", default="outputs/llm_baselines.jsonl")
     parser.add_argument("--summary", default="outputs/llm_baselines_summary.json")

@@ -50,6 +50,11 @@ class Responder:
             self.policy.attempted_containment.add((verified.action_type, verified.entity_value))
             return builder(verified.entity_value), verified
 
+        if self.policy._containment_window_open(parsed.step_index):
+            containment = self.policy._next_gated_containment(parsed.step_index, parsed.containment)
+            if containment is not None:
+                return containment, verified
+
         action = self._action_from_intent(parsed, intent)
         if action is not None:
             return action, verified

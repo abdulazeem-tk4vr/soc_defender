@@ -19,6 +19,7 @@ class DefenderGraphState:
     observation: dict[str, Any] = field(default_factory=dict)
     parsed_observation: Any | None = None
     scanner_annotations: list[dict[str, Any]] = field(default_factory=list)
+    rag_query: str = ""
     rag_context: list[dict[str, Any]] = field(default_factory=list)
     investigation_intent: dict[str, Any] = field(default_factory=dict)
     budget_state: dict[str, Any] = field(default_factory=dict)

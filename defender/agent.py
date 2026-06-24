@@ -8,8 +8,9 @@ from .graph_state import DefenderGraphState
 from .investigator import Investigator, LLMVerifier
 from .llm import LLMClient, OllamaConfig, OllamaLLMClient
 from .policy import DefenderPolicy
-from .prompt_guard import DEFAULT_PROMPT_GUARD2_MODEL, LLMLocalizer, PromptGuard2
+from .prompt_guard import LLMLocalizer, PromptGuard2
 from .rag import RAGIntel
+from .rag_query import RAGQueryPlanner
 from .scanner import InjectionScanner
 
 
@@ -19,7 +20,7 @@ class SocDefenderAgent:
     max_steps: int = 15
     llm_client: LLMClient | None = None
     rag: RAGIntel | None = None
-    prompt_guard2_model: str | None = DEFAULT_PROMPT_GUARD2_MODEL
+    prompt_guard2_model: str | None = None
     use_langgraph: bool = False
     policy: DefenderPolicy = field(init=False)
     graph: DefenderGraph | None = field(init=False, default=None)
@@ -36,6 +37,7 @@ class SocDefenderAgent:
                 policy=self.policy,
                 scanner=scanner,
                 rag=self.rag or RAGIntel(),
+                rag_query_planner=RAGQueryPlanner(self.llm_client),
                 investigator=Investigator(self.llm_client),
                 verifier=LLMVerifier(self.llm_client),
             )
@@ -67,7 +69,7 @@ def build_agent(
     max_steps: int,
     agent_llm: str = "none",
     rag: RAGIntel | None = None,
-    prompt_guard2_model: str | None = DEFAULT_PROMPT_GUARD2_MODEL,
+    prompt_guard2_model: str | None = None,
     use_langgraph: bool = False,
 ) -> SocDefenderAgent:
     llm_client: LLMClient | None = None

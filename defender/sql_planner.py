@@ -13,6 +13,7 @@ def quote_sql(value: str) -> str:
 class SQLPlanner:
     failed_queries: set[str] = field(default_factory=set)
     emitted_queries: set[str] = field(default_factory=set)
+    emitted_counts: dict[str, int] = field(default_factory=dict)
     last_emitted_sql: str | None = None
 
     def record_failure(self, sql: str) -> None:
@@ -24,6 +25,7 @@ class SQLPlanner:
     def action_for_sql(self, sql: str):
         sql = self.repair(sql)
         self.emitted_queries.add(sql)
+        self.emitted_counts[sql] = self.emitted_counts.get(sql, 0) + 1
         self.last_emitted_sql = sql
         return query_logs(sql)
 
@@ -33,20 +35,43 @@ class SQLPlanner:
             return sql
         return self.next_broad_query()
 
-    def next_broad_query(self):
-        candidates = [
+    def next_broad_query(self, report_gaps: set[str] | None = None):
+        report_gaps = report_gaps or set()
+        candidates = self._broad_candidates(report_gaps)
+        for sql in candidates:
+            if sql not in self.failed_queries and not self.already_emitted(sql):
+                return sql
+        available = [sql for sql in candidates if sql not in self.failed_queries]
+        if available:
+            return min(available, key=lambda sql: self.emitted_counts.get(sql, 0))
+        return "SELECT * FROM alerts ORDER BY step DESC LIMIT 20"
+
+    @staticmethod
+    def _broad_candidates(report_gaps: set[str]) -> list[str]:
+        default = [
             "SELECT * FROM alerts ORDER BY step DESC LIMIT 20",
             "SELECT * FROM email_logs ORDER BY step DESC LIMIT 20",
             "SELECT * FROM auth_logs ORDER BY step DESC LIMIT 20",
             "SELECT * FROM netflow ORDER BY step DESC LIMIT 20",
             "SELECT * FROM process_events ORDER BY step DESC LIMIT 20",
         ]
-        for sql in candidates:
-            if sql not in self.failed_queries and not self.already_emitted(sql):
-                return sql
-        # The benchmark still needs one legal action per step. If all broad
-        # probes are exhausted, repeat the least risky valid evidence query.
-        return "SELECT * FROM alerts ORDER BY step DESC LIMIT 20"
+        if "attacker_domain" in report_gaps:
+            return [
+                "SELECT * FROM netflow ORDER BY step DESC LIMIT 20",
+                "SELECT * FROM email_logs ORDER BY step DESC LIMIT 20",
+                "SELECT * FROM alerts ORDER BY step DESC LIMIT 20",
+                "SELECT * FROM process_events ORDER BY step DESC LIMIT 20",
+                "SELECT * FROM auth_logs ORDER BY step DESC LIMIT 20",
+            ]
+        if "data_target" in report_gaps:
+            return [
+                "SELECT * FROM process_events ORDER BY step DESC LIMIT 20",
+                "SELECT * FROM netflow ORDER BY step DESC LIMIT 20",
+                "SELECT * FROM alerts ORDER BY step DESC LIMIT 20",
+                "SELECT * FROM email_logs ORDER BY step DESC LIMIT 20",
+                "SELECT * FROM auth_logs ORDER BY step DESC LIMIT 20",
+            ]
+        return default
 
     def query_for_entity(self, entity_value: str, entity_type: str):
         value = quote_sql(entity_value)

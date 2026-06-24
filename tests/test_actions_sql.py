@@ -47,3 +47,18 @@ def test_report_validation_requires_containment_lists():
     ok, reason = validate_action(type("Action", (), {"action_type": "submit_report", "params": {"summary_json": report}})())
     assert not ok
     assert "blocked_domains" in reason
+
+
+def test_sql_planner_gap_directed_queries_and_repeat_rotation():
+    planner = SQLPlanner()
+
+    first = planner.action_for_sql(planner.next_broad_query({"attacker_domain"}))
+    second = planner.action_for_sql(planner.next_broad_query({"attacker_domain"}))
+
+    assert first.params["sql"] == "SELECT * FROM netflow ORDER BY step DESC LIMIT 20"
+    assert second.params["sql"] == "SELECT * FROM email_logs ORDER BY step DESC LIMIT 20"
+
+    for _ in range(6):
+        planner.action_for_sql(planner.next_broad_query({"attacker_domain"}))
+
+    assert planner.emitted_counts["SELECT * FROM alerts ORDER BY step DESC LIMIT 20"] <= 2

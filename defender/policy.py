@@ -60,34 +60,61 @@ class DefenderPolicy:
 
     def _next_gated_containment(self, step_index: int, containment: dict[str, list[str]]):
         candidates = [
-            ("block_domain", "domain", block_domain, set(containment.get("blocked_domains") or [])),
-            ("isolate_host", "host", isolate_host, set(containment.get("isolated_hosts") or [])),
-            ("reset_user", "user", reset_user, set(containment.get("reset_users") or [])),
+            (
+                "block_domain",
+                "domain",
+                block_domain,
+                self.report_tracker.values.get("attacker_domain"),
+                set(containment.get("blocked_domains") or []),
+            ),
+            (
+                "isolate_host",
+                "host",
+                isolate_host,
+                self.report_tracker.values.get("patient_zero_host"),
+                set(containment.get("isolated_hosts") or []),
+            ),
+            (
+                "reset_user",
+                "user",
+                reset_user,
+                self.report_tracker.values.get("compromised_user"),
+                set(containment.get("reset_users") or []),
+            ),
         ]
-        for action_type, entity_type, builder, already_done in candidates:
-            for entity_value in self.registry.best_entities(entity_type):
-                key = (action_type, entity_value)
-                if entity_value in already_done or key in self.attempted_containment:
-                    continue
-                decision = gate_containment(
-                    action_type,
-                    entity_value,
-                    self.registry,
-                    step_index=step_index,
-                    containment_min_step=self.containment_min_step,
-                )
-                if decision.approved:
-                    self.attempted_containment.add(key)
-                    return builder(entity_value)
+        for action_type, entity_type, builder, entity_value, already_done in candidates:
+            if not entity_value or entity_value == "unknown":
+                continue
+            key = (action_type, entity_value)
+            if entity_value in already_done or key in self.attempted_containment:
+                continue
+            decision = gate_containment(
+                action_type,
+                entity_value,
+                self.registry,
+                step_index=step_index,
+                containment_min_step=self.containment_min_step,
+            )
+            if decision.approved:
+                self.attempted_containment.add(key)
+                return builder(entity_value)
         return None
 
     def _investigate(self, parsed):
-        for entity_type in ("domain", "host", "user"):
+        report_gaps = {key for key, value in self.report_tracker.values.items() if value == "unknown"}
+        if "attacker_domain" in report_gaps and not self.registry.best_entities("domain"):
+            return self.sql_planner.action_for_sql(self.sql_planner.next_broad_query(report_gaps))
+        if "data_target" in report_gaps and not self.registry.best_entities("target"):
+            return self.sql_planner.action_for_sql(self.sql_planner.next_broad_query(report_gaps))
+
+        for entity_type in ("domain", "target", "host", "user"):
             for entity_value in self.registry.best_entities(entity_type):
+                if entity_value == "unknown":
+                    continue
                 action = self.sql_planner.query_for_entity(entity_value, entity_type)
                 if action.params["sql"] not in self.sql_planner.failed_queries:
                     return action
-        return self.sql_planner.action_for_sql(self.sql_planner.next_broad_query())
+        return self.sql_planner.action_for_sql(self.sql_planner.next_broad_query(report_gaps))
 
     def _record_failed_query(self, parsed) -> None:
         result = parsed.last_action_result or {}
