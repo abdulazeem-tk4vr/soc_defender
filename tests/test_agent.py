@@ -1,4 +1,5 @@
 from defender import SocDefenderAgent, build_agent
+from defender.llm import StaticJSONLLMClient
 
 
 def test_soc_defender_agent_emits_direct_action_from_observation():
@@ -53,3 +54,23 @@ def test_report_deadline_uses_episode_max_steps():
 
     assert step_14_action["action_type"] != "submit_report"
     assert step_16_action["action_type"] == "submit_report"
+
+
+def test_full_agentic_accepts_mock_llm_client():
+    agent = SocDefenderAgent(
+        mode="full_agentic",
+        max_steps=15,
+        llm_client=StaticJSONLLMClient({"intent_type": "query_logs", "action_type": "investigate"}),
+    )
+
+    action = agent.act(
+        {
+            "scenario_id": "s-1",
+            "step_index": 0,
+            "new_alerts": [],
+            "containment": {},
+            "last_action_result": {"ok": True, "message": "reset", "data": {}},
+        }
+    )
+
+    assert action["action_type"] == "query_logs"
