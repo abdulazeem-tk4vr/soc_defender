@@ -1,0 +1,66 @@
+rules:
+  - id: instruction_override.ignore_previous
+    family: instruction_override
+    severity: high
+    confidence: 0.95
+    pattern: "\\b(ignore|disregard|override|forget|bypass|neglect)\\b.{0,80}\\b(previous|prior|above|earlier|system|developer|original)\\b.{0,40}\\b(instructions?|rules?|prompt|constraints?|policy|message)\\b"
+
+  - id: instruction_override.from_now_on
+    family: instruction_override
+    severity: high
+    confidence: 0.88
+    pattern: "\\b(from now on|starting now|for the rest of this conversation)\\b.{0,80}\\b(ignore|follow only|you must)\\b"
+
+  - id: role_play.persona_hijack
+    family: role_play
+    severity: high
+    confidence: 0.86
+    pattern: "\\b(you are now|act as|pretend to be|roleplay as|simulate)\\b.{0,80}\\b(dan|developer mode|jailbreak|unfiltered|uncensored|evil|admin|root)\\b"
+
+  - id: context_manipulation.false_authorization
+    family: context_manipulation
+    severity: medium
+    confidence: 0.78
+    pattern: "\\b(context|system note|developer note|admin note|policy update)\\s*:\\s*.{0,120}\\b(approved|authorized|allowed|safe|trusted)\\b"
+
+  - id: hijacking.prompt_extraction
+    family: hijacking
+    severity: high
+    confidence: 0.94
+    pattern: "\\b(show|print|reveal|dump|repeat|output)\\b.{0,80}\\b(system prompt|developer prompt|hidden instructions|all prompts|secret|policy)\\b"
+
+  - id: hijacking.output_redirection
+    family: hijacking
+    severity: high
+    confidence: 0.86
+    pattern: "\\b(before answering|instead of answering|do not answer the user)\\b.{0,100}\\b(print|return|say|output)\\b"
+
+  - id: authority_impersonation.override
+    family: authority_impersonation
+    severity: medium
+    confidence: 0.82
+    pattern: "\\b(authorized override|emergency override|priority override|debug override)\\b"
+
+  - id: psychological.urgent_bypass
+    family: psychological_manipulation
+    severity: medium
+    confidence: 0.74
+    pattern: "\\b(urgent|emergency|stop everything|critical|life or death)\\b.{0,100}\\b(ignore|bypass|must|immediately)\\b"
+
+  - id: formatting.zero_width
+    family: formatting_obfuscation
+    severity: low
+    confidence: 0.35
+    pattern: "[\\u200b-\\u200f\\u2060-\\u2064\\ufeff]"
+
+  - id: formatting.repeated_separators
+    family: formatting_obfuscation
+    severity: low
+    confidence: 0.35
+    pattern: "([^\\w\\s])\\1{8,}"
+
+  - id: multilingual.override_marker
+    family: multilingual_marker
+    severity: medium
+    confidence: 0.65
+    pattern: "\\b(ignora|ignorer|ignoriere|olvida|oublie|vergiss)\\b.{0,80}\\b(instrucciones|instructions|anweisungen|regles|reglas)\\b"
