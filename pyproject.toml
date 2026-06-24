@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "soc-defender"
+version = "0.1.0"
+description = "Evidence-gated defender for OpenSec benchmark scenarios."
+requires-python = ">=3.11"
+dependencies = [
+  "openai",
+  "pydantic",
+  "pyyaml",
+  "requests",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+agentic = [
+  "httpx",
+  "jsonschema",
+  "fastapi",
+  "uvicorn",
+  "qdrant-client",
+  "transformers",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["defender*"]

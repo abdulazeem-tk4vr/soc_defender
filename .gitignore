@@ -1,0 +1,30 @@
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Build and packaging outputs
+*.egg-info/
+build/
+dist/
+
+# Local environment
+.env
+.venv/
+venv/
+
+# Generated benchmark outputs
+outputs/*
+!outputs/.gitkeep
+
+# Generated local model/RAG artifacts
+data/models/*
+!data/models/.gitkeep
+data/rag/qdrant/*
+!data/rag/qdrant/.gitkeep
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

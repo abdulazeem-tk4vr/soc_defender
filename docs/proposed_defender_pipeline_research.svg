@@ -1,0 +1,134 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1120" viewBox="0 0 1600 1120">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L8,3 z" fill="#111"/>
+    </marker>
+    <marker id="arrow-dash" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L8,3 z" fill="#111"/>
+    </marker>
+    <style>
+      .title { font: 700 34px "Times New Roman", serif; fill: #111; }
+      .subtitle { font: italic 19px "Times New Roman", serif; fill: #111; }
+      .section { font: 700 23px "Times New Roman", serif; fill: #111; }
+      .label { font: 17px "Times New Roman", serif; fill: #111; }
+      .small { font: 15px "Times New Roman", serif; fill: #111; }
+      .tiny { font: 13px "Times New Roman", serif; fill: #111; }
+      .italic { font: italic 15px "Times New Roman", serif; fill: #111; }
+      .box { fill: #fff; stroke: #111; stroke-width: 2.5; }
+      .soft { fill: #f7f7f7; stroke: #111; stroke-width: 2.5; }
+      .dark { fill: #111; stroke: #111; stroke-width: 2.5; }
+      .darkText { font: 700 22px "Times New Roman", serif; fill: #fff; }
+      .darkSub { font: italic 15px "Times New Roman", serif; fill: #fff; }
+      .dash { fill: #fff; stroke: #111; stroke-width: 2.4; stroke-dasharray: 8 6; }
+      .line { stroke: #111; stroke-width: 2.8; fill: none; marker-end: url(#arrow); }
+      .thinLine { stroke: #111; stroke-width: 2.1; fill: none; marker-end: url(#arrow); }
+      .dashLine { stroke: #111; stroke-width: 2.2; stroke-dasharray: 8 6; fill: none; marker-end: url(#arrow-dash); }
+      .spine { fill: #f1f1f1; stroke: #111; stroke-width: 2.4; stroke-dasharray: 7 5; }
+      .badge { fill: #fff; stroke: #111; stroke-width: 2.5; }
+      .badgeText { font: 700 16px "Times New Roman", serif; fill: #111; }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1600" height="1120" fill="#fff"/>
+
+  <text x="800" y="52" text-anchor="middle" class="title">Proposed Defender Pipeline: Internal Agentic System</text>
+  <text x="800" y="82" text-anchor="middle" class="subtitle">LangGraph state captures every internal node decision; only the final responder output becomes one committed action.</text>
+
+  <rect x="70" y="112" width="1460" height="92" rx="8" class="spine"/>
+  <text x="92" y="145" class="section">LangGraph State Spine</text>
+  <text x="92" y="174" class="label">episode state · observations · scanner output · evidence registry · RAG context · investigator summary · budget phase · verifier decision · gate result · responder output · commit response</text>
+
+  <rect x="95" y="244" width="1410" height="730" rx="8" class="box"/>
+  <text x="800" y="280" text-anchor="middle" class="section">Proposed Defender Pipeline</text>
+
+  <!-- Row A: scanner and registry -->
+  <rect x="130" y="326" width="360" height="126" rx="6" class="soft"/>
+  <text x="310" y="357" text-anchor="middle" class="section">A. Injection Scanner</text>
+  <text x="310" y="386" text-anchor="middle" class="label">Regex → Prompt Guard 2 → LLM localization</text>
+  <text x="310" y="414" text-anchor="middle" class="small">outputs untrusted spans + preserved IOCs</text>
+  <text x="310" y="438" text-anchor="middle" class="italic">LLM call only after scanner flag</text>
+
+  <rect x="610" y="326" width="360" height="126" rx="6" class="soft"/>
+  <text x="790" y="357" text-anchor="middle" class="section">B. Evidence Registry</text>
+  <text x="790" y="386" text-anchor="middle" class="label">normalizes exposed evidence</text>
+  <text x="790" y="414" text-anchor="middle" class="small">entities · trust tiers · content IDs · report gaps</text>
+
+  <rect x="1090" y="326" width="360" height="126" rx="6" class="soft"/>
+  <text x="1270" y="357" text-anchor="middle" class="section">C. RAG Intel</text>
+  <text x="1270" y="386" text-anchor="middle" class="label">retrieves context before investigator</text>
+  <text x="1270" y="414" text-anchor="middle" class="small">ATT&amp;CK · Sigma · D3FEND · CWE</text>
+
+  <path d="M490 389 H610" class="line"/>
+  <path d="M970 389 H1090" class="line"/>
+
+  <!-- Row B: investigator, budget, verifier -->
+  <rect x="180" y="548" width="395" height="145" rx="6" class="box"/>
+  <text x="377.5" y="580" text-anchor="middle" class="section">D. Evidence Investigator LLM</text>
+  <text x="377.5" y="610" text-anchor="middle" class="label">reads registry + RAG + observations so far</text>
+  <text x="377.5" y="638" text-anchor="middle" class="small">outputs evidence summary, uncertainty, investigation intent</text>
+  <text x="377.5" y="665" text-anchor="middle" class="italic">must not propose containment or submit_report</text>
+
+  <rect x="685" y="548" width="270" height="145" rx="6" class="box"/>
+  <text x="820" y="580" text-anchor="middle" class="section">E. Step Budget</text>
+  <text x="820" y="610" text-anchor="middle" class="label">committed-step policy</text>
+  <text x="820" y="638" text-anchor="middle" class="small">evidence · gated containment</text>
+  <text x="820" y="665" text-anchor="middle" class="small">report completion · submit</text>
+
+  <rect x="1065" y="548" width="395" height="145" rx="6" class="box"/>
+  <text x="1262.5" y="580" text-anchor="middle" class="section">F. Kill Chain Coherence</text>
+  <text x="1262.5" y="610" text-anchor="middle" class="label">makes sense of trajectory so far</text>
+  <text x="1262.5" y="638" text-anchor="middle" class="small">selects final-action candidate</text>
+  <text x="1262.5" y="665" text-anchor="middle" class="italic">owns containment/report candidacy</text>
+
+  <path d="M1270 452 C1270 500 378 500 378 548" class="line"/>
+  <path d="M575 620 H685" class="line"/>
+  <path d="M955 620 H1065" class="line"/>
+
+  <!-- Row C: gate and responder -->
+  <rect x="295" y="790" width="420" height="126" rx="6" class="box"/>
+  <text x="505" y="822" text-anchor="middle" class="section">G. Evidence Gate</text>
+  <text x="505" y="852" text-anchor="middle" class="label">deterministic EGAR + schema + action/entity checks</text>
+  <text x="505" y="880" text-anchor="middle" class="small">rejects unsafe candidates; preserves exact support records</text>
+
+  <rect x="885" y="790" width="420" height="126" rx="6" class="dark"/>
+  <text x="1095" y="824" text-anchor="middle" class="darkText">H. Responder</text>
+  <text x="1095" y="855" text-anchor="middle" class="darkSub">serializes exactly one verifier-approved legal action</text>
+  <text x="1095" y="883" text-anchor="middle" class="darkSub">no internal node may commit actions directly</text>
+
+  <path d="M1262 693 C1262 744 505 744 505 790" class="line"/>
+  <path d="M715 853 H885" class="line"/>
+
+  <!-- Commit boundary only, no OpenSec core box -->
+  <rect x="1015" y="982" width="280" height="62" rx="6" class="dash"/>
+  <text x="1155" y="1008" text-anchor="middle" class="section">Commit Boundary</text>
+  <text x="1155" y="1034" text-anchor="middle" class="small">one action leaves the pipeline</text>
+  <path d="M1095 916 V982" class="line"/>
+
+  <!-- State writebacks -->
+  <path d="M310 326 C310 248 260 204 260 204" class="dashLine"/>
+  <path d="M790 326 C790 250 640 204 640 204" class="dashLine"/>
+  <path d="M1270 326 C1270 250 1070 204 1070 204" class="dashLine"/>
+  <path d="M378 548 C378 498 410 204 410 204" class="dashLine"/>
+  <path d="M820 548 C820 500 810 204 810 204" class="dashLine"/>
+  <path d="M1262 548 C1262 500 1215 204 1215 204" class="dashLine"/>
+  <path d="M505 790 C505 700 540 204 540 204" class="dashLine"/>
+  <path d="M1095 790 C1095 700 965 204 965 204" class="dashLine"/>
+
+  <!-- Legend -->
+  <rect x="116" y="1000" width="640" height="68" rx="5" class="box"/>
+  <line x1="140" y1="1022" x2="205" y2="1022" class="line"/>
+  <text x="225" y="1028" class="small">control flow</text>
+  <line x1="350" y1="1022" x2="415" y2="1022" class="dashLine"/>
+  <text x="435" y="1028" class="small">writes to LangGraph state</text>
+  <text x="140" y="1055" class="italic">Internal LLM calls are scanner localization, investigator analysis, and verifier decisioning.</text>
+
+  <!-- Numeric badges -->
+  <circle cx="128" cy="324" r="18" class="badge"/><text x="128" y="330" text-anchor="middle" class="badgeText">1</text>
+  <circle cx="608" cy="324" r="18" class="badge"/><text x="608" y="330" text-anchor="middle" class="badgeText">2</text>
+  <circle cx="1088" cy="324" r="18" class="badge"/><text x="1088" y="330" text-anchor="middle" class="badgeText">3</text>
+  <circle cx="178" cy="548" r="18" class="badge"/><text x="178" y="554" text-anchor="middle" class="badgeText">4</text>
+  <circle cx="683" cy="548" r="18" class="badge"/><text x="683" y="554" text-anchor="middle" class="badgeText">5</text>
+  <circle cx="1063" cy="548" r="18" class="badge"/><text x="1063" y="554" text-anchor="middle" class="badgeText">6</text>
+  <circle cx="293" cy="790" r="18" class="badge"/><text x="293" y="796" text-anchor="middle" class="badgeText">7</text>
+  <circle cx="883" cy="790" r="18" class="badge"/><text x="883" y="796" text-anchor="middle" class="badgeText">8</text>
+</svg>

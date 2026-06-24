@@ -1,0 +1,9 @@
+defender:
+  mode: evidence_gate_only
+  max_steps: 15
+  report_deadline_step: null
+  containment_min_step: 5
+
+ollama:
+  env_base_url: OLLAMA_BASE_URL
+  env_model: OLLAMA_MODEL

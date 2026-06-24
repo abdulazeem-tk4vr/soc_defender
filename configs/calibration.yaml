@@ -1,0 +1,6 @@
+calibration:
+  status: initial
+  tuned_on: train
+  notes: "Initial deterministic MVP thresholds. Tune only on OpenSec train split."
+  containment_min_step: 5
+  report_deadline_step: null
