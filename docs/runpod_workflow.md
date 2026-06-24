@@ -20,6 +20,15 @@ Recommended raw corpus sources:
 - CWE descriptions
 - Defensive SOC playbooks that do not contain OpenSec seed or oracle content
 
+Current local corpus snapshot:
+
+- ATT&CK Enterprise JSON
+- CWE XML
+- D3FEND JSON
+- Sigma rules: 3,295 YAML files
+- Chunk output: `data/rag/chunks.jsonl`
+- Chunk count: 41,722
+
 ## Live Ollama Eval
 
 Set these locally or in `.env`:

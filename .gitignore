@@ -22,6 +22,9 @@ data/models/*
 !data/models/.gitkeep
 data/rag/qdrant/*
 !data/rag/qdrant/.gitkeep
+data/rag/raw/*
+!data/rag/raw/.gitkeep
+data/rag/chunks.jsonl
 
 # Editor and OS files
 .DS_Store
