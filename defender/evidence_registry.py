@@ -4,6 +4,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from .scanner import InjectionScanner
+
 HOST_RE = re.compile(r"\bh-[A-Za-z0-9_.-]+\b")
 USER_RE = re.compile(r"\bu-[A-Za-z0-9_.-]+\b")
 TARGET_RE = re.compile(r"\bt-[A-Za-z0-9_.-]+\b")
@@ -110,6 +112,7 @@ class EvidenceRegistry:
     supports: list[EntitySupport] = field(default_factory=list)
     content_ids: set[str] = field(default_factory=set)
     seen_ids: set[str] = field(default_factory=set)
+    scanner: InjectionScanner = field(default_factory=InjectionScanner)
 
     def update_from_observation(self, observation: Any) -> None:
         self.content_ids.update(getattr(observation, "evidence_content_ids", set()))
@@ -136,6 +139,7 @@ class EvidenceRegistry:
         self.content_ids.add(evidence_id)
         text = _text_from_row(row)
         indicators = _indicators(text)
+        scan = self.scanner.scan_evidence_row(row)
         for value, entity_type, fields in _extract_entities(row):
             support = EntitySupport(
                 entity_value=value,
@@ -149,6 +153,7 @@ class EvidenceRegistry:
                 step_seen=step_seen,
                 supporting_fields=fields,
                 malicious_indicators=indicators,
+                scanner_status=scan.status,
             )
             if support not in self.supports:
                 self.supports.append(support)
