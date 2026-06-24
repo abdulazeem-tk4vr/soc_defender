@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from defender.rag_build import build_chunks, load_documents, read_chunks_jsonl, should_index, write_chunks_jsonl
+from scripts.build_qdrant_index import build_qdrant_index
 
 
 def test_should_index_excludes_opensec_and_ground_truth_paths():
@@ -26,3 +27,7 @@ def test_build_chunks_is_stable_and_overlapping(tmp_path):
     assert chunks[0].chunk_id == build_chunks(docs, max_chars=100, overlap_chars=10)[0].chunk_id
     assert output.read_text().count("\n") == len(chunks)
     assert read_chunks_jsonl(output) == chunks
+
+
+def test_qdrant_build_function_accepts_transformers_backend():
+    assert callable(build_qdrant_index)

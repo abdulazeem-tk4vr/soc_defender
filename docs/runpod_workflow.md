@@ -62,23 +62,41 @@ Upload or sync:
 Install runtime dependencies on RunPod:
 
 ```bash
-pip install qdrant-client sentence-transformers torch
+pip install qdrant-client transformers torch
 ```
 
-Build the Qdrant collection:
+Build the Qdrant collection with the default SecureBERT/transformers/CUDA settings:
+
+```bash
+python scripts/build_qdrant_index.py --chunks data/rag/chunks.jsonl
+```
+
+Equivalent explicit command:
 
 ```bash
 python scripts/build_qdrant_index.py \
   --chunks data/rag/chunks.jsonl \
   --output-dir data/rag/qdrant \
-  --embedding-model sentence-transformers/all-MiniLM-L6-v2 \
+  --embedding-backend transformers \
+  --embedding-model ehsanaghaei/SecureBERT \
   --collection soc_defender_intel \
-  --device cuda
+  --device cuda \
+  --batch-size 16
 ```
 
 The script embeds chunks in batches, writes a local Qdrant collection, and stores `data/rag/qdrant/build_manifest.json`.
 
-If you want to try a SecureBERT-style model, pass the model name with `--embedding-model`. The script uses `sentence-transformers`, so the selected model must be loadable by that library or wrapped later.
+For a quick pipeline smoke test, you can switch to a smaller sentence-transformers model:
+
+```bash
+python scripts/build_qdrant_index.py \
+  --chunks data/rag/chunks.jsonl \
+  --output-dir data/rag/qdrant \
+  --embedding-backend sentence-transformers \
+  --embedding-model sentence-transformers/all-MiniLM-L6-v2 \
+  --collection soc_defender_intel \
+  --device cuda
+```
 
 ## What I Need From You
 
@@ -93,8 +111,7 @@ For RAG embedding:
 - Which GPU/image you will use.
 - Whether PyTorch CUDA and Hugging Face downloads are allowed on the pod.
 - The corpus files to stage under `data/rag/raw`, or approval to fetch public corpora from RunPod.
-- Whether to use `ehsanaghaei/SecureBERT` or a different embedding model.
-- Whether `sentence-transformers/all-MiniLM-L6-v2` is acceptable for the first index smoke test before switching to a SecureBERT-family model.
+- Whether to use `ehsanaghaei/SecureBERT` or a different SecureBERT-family embedding model.
 
 ## Safety Boundary
 

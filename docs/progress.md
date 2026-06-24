@@ -269,6 +269,7 @@ Partially implemented or notable limitations:
 - The graph is LangGraph-compatible in shape but does not depend on LangGraph yet.
 - Live Ollama calls require `OLLAMA_BASE_URL` and are not used in deterministic tests.
 - Qdrant retrieval is implemented behind lazy imports and requires a runtime embedder plus a built local collection.
+- Qdrant build supports both Hugging Face `transformers` mean-pooling embeddings and `sentence-transformers` embeddings; SecureBERT is the default RunPod build model.
 - RAG chunk build utilities and RunPod workflow documentation exist.
 - Current external corpus includes ATT&CK Enterprise, CWE, D3FEND, and all 3,295 Sigma rule files from the downloaded Sigma archive.
 - Current `data/rag/chunks.jsonl` has 41,722 chunks.

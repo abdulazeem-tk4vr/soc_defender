@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Iterable
 
 from defender.rag_build import CorpusChunk, read_chunks_jsonl
+from defender.embeddings import HuggingFaceTransformerEmbedder, SentenceTransformerEmbedder
 
 
 def batched(items: tuple[CorpusChunk, ...], batch_size: int) -> Iterable[tuple[CorpusChunk, ...]]:
@@ -15,26 +16,15 @@ def batched(items: tuple[CorpusChunk, ...], batch_size: int) -> Iterable[tuple[C
         yield items[start : start + batch_size]
 
 
-class SentenceTransformerEmbedder:
-    def __init__(self, model_name: str, device: str | None = None) -> None:
-        try:
-            from sentence_transformers import SentenceTransformer
-        except ImportError as exc:
-            raise RuntimeError("Install sentence-transformers on RunPod to build embeddings") from exc
-        self.model = SentenceTransformer(model_name, device=device)
-
-    def embed(self, texts: list[str]) -> list[list[float]]:
-        vectors = self.model.encode(texts, normalize_embeddings=True, show_progress_bar=False)
-        return [vector.tolist() for vector in vectors]
-
-
 def build_qdrant_index(
     chunks_path: Path,
     output_dir: Path,
     collection: str,
     embedding_model: str,
+    embedding_backend: str,
     batch_size: int,
     device: str | None,
+    max_length: int,
 ) -> dict[str, object]:
     try:
         from qdrant_client import QdrantClient
@@ -46,7 +36,12 @@ def build_qdrant_index(
     if not chunks:
         raise ValueError(f"No chunks found in {chunks_path}")
     output_dir.mkdir(parents=True, exist_ok=True)
-    embedder = SentenceTransformerEmbedder(embedding_model, device=device)
+    if embedding_backend == "sentence-transformers":
+        embedder = SentenceTransformerEmbedder(embedding_model, device=device)
+    elif embedding_backend == "transformers":
+        embedder = HuggingFaceTransformerEmbedder(embedding_model, device=device, max_length=max_length)
+    else:
+        raise ValueError(f"Unsupported embedding backend: {embedding_backend}")
     first_vector = embedder.embed([chunks[0].text])[0]
     client = QdrantClient(path=str(output_dir))
     client.recreate_collection(
@@ -70,10 +65,12 @@ def build_qdrant_index(
         "chunk_count": len(chunks),
         "output_dir": str(output_dir),
         "embedding_model": embedding_model,
+        "embedding_backend": embedding_backend,
         "collection": collection,
         "vector_size": len(first_vector),
         "batch_size": batch_size,
         "device": device or "auto",
+        "max_length": max_length,
     }
     (output_dir / "build_manifest.json").write_text(json.dumps(manifest, indent=2))
     return manifest
@@ -83,10 +80,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Build local Qdrant RAG index from soc_defender chunks.")
     parser.add_argument("--chunks", required=True, help="JSONL chunks produced by scripts/build_rag_chunks.py")
     parser.add_argument("--output-dir", default="data/rag/qdrant")
-    parser.add_argument("--embedding-model", default="sentence-transformers/all-MiniLM-L6-v2")
+    parser.add_argument("--embedding-model", default="ehsanaghaei/SecureBERT")
+    parser.add_argument("--embedding-backend", default="transformers", choices=["transformers", "sentence-transformers"])
     parser.add_argument("--collection", default="soc_defender_intel")
-    parser.add_argument("--batch-size", type=int, default=32)
-    parser.add_argument("--device", default="", help="Optional sentence-transformers device, e.g. cuda or cpu")
+    parser.add_argument("--batch-size", type=int, default=16)
+    parser.add_argument("--device", default="cuda", help="Embedding device, e.g. cuda or cpu")
+    parser.add_argument("--max-length", type=int, default=512)
     args = parser.parse_args()
 
     manifest = build_qdrant_index(
@@ -94,8 +93,10 @@ def main() -> int:
         output_dir=Path(args.output_dir),
         collection=args.collection,
         embedding_model=args.embedding_model,
+        embedding_backend=args.embedding_backend,
         batch_size=args.batch_size,
         device=args.device or None,
+        max_length=args.max_length,
     )
     print(json.dumps(manifest, indent=2))
     return 0
