@@ -165,7 +165,6 @@ def _default_report() -> Dict[str, Any]:
 def run_episode(
     seed_path: Path,
     model_cfg: Dict[str, Any],
-    max_steps: int,
     defender: str = "baseline",
     agent_llm: str = "none",
     rag_path: str = "",
@@ -173,13 +172,10 @@ def run_episode(
     prompt_guard2_model: str = "",
     use_langgraph: bool = False,
 ) -> Dict[str, Any]:
-    seed_cfg = load_json(seed_path)
-    seed_max_steps = seed_cfg.get("max_steps")
-    episode_max_steps = int(seed_max_steps) if seed_max_steps is not None else max_steps
-
     env = OpenSecEnvironment(seed_path=str(seed_path))
     reset_result = env.reset()
     observation = reset_result.observation.model_dump()
+    episode_max_steps = int(env.max_steps)
 
 
     # Collect known entities for EGAR evidence tracking
@@ -226,7 +222,7 @@ def run_episode(
             {
                 "action": action.model_dump(),
                 "attacker_action": result.info.get("attacker_action"),
-                "injection_violations": result.info.get("injection_violations", []),
+                "injection_violations": list(env.injection_violations),
                 "graph_trace": [
                     asdict(trace)
                     for trace in getattr(getattr(agent, "last_graph_state", None), "traces", [])
@@ -249,10 +245,11 @@ def run_episode(
             report = action.params.get("summary_json")
             submitted_report = True
             break
+        if result.done:
+            break
 
     if report is None:
         report = _default_report()
-        result = env.step(AgentAction(action_type="submit_report", params={"summary_json": report}))
 
     # Compute EGAR calibration metrics
     step_actions = [
@@ -332,7 +329,6 @@ def main() -> int:
     parser.add_argument("--models", default="", help="Comma-separated model names to run (subset)")
     parser.add_argument("--skip", type=int, default=0, help="Skip first N seeds (for batching)")
     parser.add_argument("--limit", type=int, default=10)
-    parser.add_argument("--max-steps", type=int, default=15)
     # added code for compatibility: switch between OpenSec baseline and soc_defender agent.
     parser.add_argument("--defender", default="baseline", choices=["baseline", "evidence_gate_only", "full_agentic"])
     parser.add_argument("--agent-llm", default="none", choices=["none", "ollama"], help="Optional internal LLM backend for full_agentic mode")
@@ -419,7 +415,7 @@ def main() -> int:
 
     print(
         f"Running defender={args.defender} models={len(model_list)} split={args.split} "
-        f"tier={args.tier or 'all'} seeds={len(seeds)} max_steps={args.max_steps} "
+        f"tier={args.tier or 'all'} seeds={len(seeds)} "
         f"rag={'off' if not args.rag_path else args.rag_path}",
         flush=True,
     )
@@ -438,7 +434,6 @@ def main() -> int:
                 result = run_episode(
                     seed_path,
                     model_cfg,
-                    args.max_steps,
                     args.defender,
                     agent_llm=args.agent_llm,
                     rag_path=args.rag_path,
