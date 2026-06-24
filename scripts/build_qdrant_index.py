@@ -17,6 +17,17 @@ def log(message: str) -> None:
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}", flush=True)
 
 
+def format_seconds(seconds: float) -> str:
+    seconds = max(0, int(seconds))
+    hours, remainder = divmod(seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours}h{minutes:02d}m{secs:02d}s"
+    if minutes:
+        return f"{minutes}m{secs:02d}s"
+    return f"{secs}s"
+
+
 def batched(items: tuple[CorpusChunk, ...], batch_size: int) -> Iterable[tuple[CorpusChunk, ...]]:
     for start in range(0, len(items), batch_size):
         yield items[start : start + batch_size]
@@ -32,7 +43,15 @@ def build_qdrant_index(
     device: str | None,
     max_length: int,
 ) -> dict[str, object]:
+    log("qdrant build start")
+    log(
+        "config "
+        f"chunks={chunks_path} output_dir={output_dir} collection={collection} "
+        f"embedding_backend={embedding_backend} embedding_model={embedding_model} "
+        f"batch_size={batch_size} device={device or 'auto'} max_length={max_length}"
+    )
     try:
+        log("importing qdrant-client")
         from qdrant_client import QdrantClient
         from qdrant_client.models import Distance, PointStruct, VectorParams
     except ImportError as exc:
@@ -52,6 +71,7 @@ def build_qdrant_index(
         embedder = HuggingFaceTransformerEmbedder(embedding_model, device=device, max_length=max_length)
     else:
         raise ValueError(f"Unsupported embedding backend: {embedding_backend}")
+    log("model loaded")
     log("embedding first chunk to determine vector size")
     first_vector = embedder.embed([chunks[0].text])[0]
     log(f"vector_size={len(first_vector)}")
@@ -65,17 +85,37 @@ def build_qdrant_index(
     point_id = 0
     total_batches = math.ceil(len(chunks) / batch_size)
     started = time.time()
+    log(f"indexing start total_batches={total_batches} total_chunks={len(chunks)}")
     for batch_index, batch in enumerate(batched(chunks, batch_size), start=1):
+        batch_started = time.time()
         vectors = embedder.embed([chunk.text for chunk in batch])
+        embed_seconds = time.time() - batch_started
+        upsert_started = time.time()
         points = []
         for chunk, vector in zip(batch, vectors):
             payload = asdict(chunk)
             points.append(PointStruct(id=point_id, vector=vector, payload=payload))
             point_id += 1
         client.upsert(collection_name=collection, points=points)
-        if batch_index == 1 or batch_index % 25 == 0 or batch_index == total_batches:
+        upsert_seconds = time.time() - upsert_started
+        batch_seconds = time.time() - batch_started
+        if batch_index == 1 or batch_index % 5 == 0 or batch_index == total_batches:
             elapsed = time.time() - started
-            log(f"indexed batch={batch_index}/{total_batches} points={point_id}/{len(chunks)} elapsed_seconds={elapsed:.1f}")
+            points_per_second = point_id / elapsed if elapsed else 0.0
+            remaining_points = len(chunks) - point_id
+            eta = remaining_points / points_per_second if points_per_second else 0.0
+            log(
+                "indexed "
+                f"batch={batch_index}/{total_batches} "
+                f"points={point_id}/{len(chunks)} "
+                f"batch_size={len(batch)} "
+                f"batch_seconds={batch_seconds:.2f} "
+                f"embed_seconds={embed_seconds:.2f} "
+                f"upsert_seconds={upsert_seconds:.2f} "
+                f"points_per_second={points_per_second:.1f} "
+                f"elapsed={format_seconds(elapsed)} "
+                f"eta={format_seconds(eta)}"
+            )
 
     manifest = {
         "status": "complete",
@@ -92,6 +132,7 @@ def build_qdrant_index(
     }
     (output_dir / "build_manifest.json").write_text(json.dumps(manifest, indent=2))
     log(f"manifest written path={output_dir / 'build_manifest.json'}")
+    log("qdrant build complete")
     return manifest
 
 

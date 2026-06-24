@@ -62,40 +62,35 @@ Upload or sync:
 Install runtime dependencies on RunPod:
 
 ```bash
-pip install qdrant-client transformers torch
+pip install qdrant-client sentence-transformers torch
 ```
 
-Build the Qdrant collection with the default SecureBERT/transformers/CUDA settings:
+Build the Qdrant collection with the preferred SecureBERT 2.0 bi-encoder:
 
 ```bash
-python scripts/build_qdrant_index.py --chunks data/rag/chunks.jsonl
+python scripts/build_qdrant_index.py --chunks data/rag/chunks.jsonl --embedding-backend sentence-transformers --embedding-model "cisco-ai/SecureBERT2.0-biencoder" --batch-size 1024 --max-length 512
 ```
 
-Equivalent explicit command:
+Use quotes around the model name. Do not split `cisco-ai/SecureBERT2.0-biencoder` across shell lines.
+
+If batch size `1024` runs out of GPU memory, retry with `512`:
 
 ```bash
-python scripts/build_qdrant_index.py \
-  --chunks data/rag/chunks.jsonl \
-  --output-dir data/rag/qdrant \
-  --embedding-backend transformers \
-  --embedding-model ehsanaghaei/SecureBERT \
-  --collection soc_defender_intel \
-  --device cuda \
-  --batch-size 16
+python scripts/build_qdrant_index.py --chunks data/rag/chunks.jsonl --embedding-backend sentence-transformers --embedding-model "cisco-ai/SecureBERT2.0-biencoder" --batch-size 512 --max-length 512
 ```
 
 The script embeds chunks in batches, writes a local Qdrant collection, and stores `data/rag/qdrant/build_manifest.json`.
 
-For a quick pipeline smoke test, you can switch to a smaller sentence-transformers model:
+Fallback options:
+
+- `cisco-ai/SecureBERT2.0-biencoder`: preferred cybersecurity retrieval model.
+- `ehsanaghaei/SecureBERT`: older SecureBERT transformer fallback.
+- `sentence-transformers/all-MiniLM-L6-v2`: fast smoke-test fallback, not security-domain specific.
+
+Fast smoke-test command:
 
 ```bash
-python scripts/build_qdrant_index.py \
-  --chunks data/rag/chunks.jsonl \
-  --output-dir data/rag/qdrant \
-  --embedding-backend sentence-transformers \
-  --embedding-model sentence-transformers/all-MiniLM-L6-v2 \
-  --collection soc_defender_intel \
-  --device cuda
+python scripts/build_qdrant_index.py --chunks data/rag/chunks.jsonl --embedding-backend sentence-transformers --embedding-model "sentence-transformers/all-MiniLM-L6-v2" --batch-size 1024 --max-length 256
 ```
 
 ## What I Need From You
@@ -111,7 +106,7 @@ For RAG embedding:
 - Which GPU/image you will use.
 - Whether PyTorch CUDA and Hugging Face downloads are allowed on the pod.
 - The corpus files to stage under `data/rag/raw`, or approval to fetch public corpora from RunPod.
-- Whether to use `ehsanaghaei/SecureBERT` or a different SecureBERT-family embedding model.
+- Whether to use `cisco-ai/SecureBERT2.0-biencoder` or a different SecureBERT-family embedding model.
 
 ## Safety Boundary
 

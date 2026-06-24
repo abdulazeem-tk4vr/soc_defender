@@ -1,6 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import time
+
+
+def log(message: str) -> None:
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}", flush=True)
 
 
 @dataclass
@@ -13,7 +18,12 @@ class SentenceTransformerEmbedder:
             from sentence_transformers import SentenceTransformer
         except ImportError as exc:
             raise RuntimeError("Install sentence-transformers to use SentenceTransformerEmbedder") from exc
+        log(f"SentenceTransformer loading model={self.model_name} device={self.device or 'auto'}")
         self.model = SentenceTransformer(self.model_name, device=self.device)
+        try:
+            log(f"SentenceTransformer loaded device={self.model.device}")
+        except Exception:
+            log("SentenceTransformer loaded")
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         vectors = self.model.encode(texts, normalize_embeddings=True, show_progress_bar=False)
@@ -34,9 +44,16 @@ class HuggingFaceTransformerEmbedder:
             raise RuntimeError("Install torch and transformers to use HuggingFaceTransformerEmbedder") from exc
         self.torch = torch
         self.device_name = self.device or ("cuda" if torch.cuda.is_available() else "cpu")
+        log(
+            "HuggingFaceTransformer loading "
+            f"model={self.model_name} device={self.device_name} cuda_available={torch.cuda.is_available()}"
+        )
+        if torch.cuda.is_available():
+            log(f"cuda_device={torch.cuda.get_device_name(0)}")
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
         self.model = AutoModel.from_pretrained(self.model_name).to(self.device_name)
         self.model.eval()
+        log("HuggingFaceTransformer loaded")
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         encoded = self.tokenizer(
