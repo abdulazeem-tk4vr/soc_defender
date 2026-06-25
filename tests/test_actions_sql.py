@@ -1,5 +1,5 @@
 from defender.actions import normalize_report, query_logs, validate_action
-from defender.sql_planner import SQLPlanner, is_safe_select
+from defender.sql_planner import SQLPlanner, is_allowlisted_template, is_safe_select
 
 
 def test_query_logs_rejects_non_evidence_tables_and_select_one():
@@ -36,6 +36,15 @@ def test_sql_planner_entity_queries_use_step_ordering():
 
     assert "ORDER BY step DESC" in action.params["sql"]
     assert "created_at" not in action.params["sql"]
+    assert is_allowlisted_template(action.params["sql"])
+
+
+def test_sql_planner_rejects_arbitrary_safe_selects_to_templates():
+    planner = SQLPlanner()
+    action = planner.action_for_sql("SELECT host_id FROM alerts ORDER BY step DESC LIMIT 20")
+
+    assert action.params["sql"] == "SELECT * FROM alerts ORDER BY step DESC LIMIT 20"
+    assert is_allowlisted_template(action.params["sql"])
 
 
 def test_report_validation_requires_containment_lists():

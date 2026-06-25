@@ -25,6 +25,7 @@ class SocDefenderAgent:
     use_langgraph: bool = False
     policy: DefenderPolicy = field(init=False)
     graph: DefenderGraph | None = field(init=False, default=None)
+    langgraph_app: Any | None = field(init=False, default=None)
     last_graph_state: DefenderGraphState | None = field(init=False, default=None)
 
     def __post_init__(self) -> None:
@@ -42,16 +43,21 @@ class SocDefenderAgent:
                 investigator=Investigator(self.llm_client),
                 verifier=LLMVerifier(self.llm_client),
             )
+            if self.use_langgraph:
+                from .langgraph_adapter import build_langgraph
+
+                self.langgraph_app = build_langgraph(self.graph)
 
     def act(self, observation: dict[str, Any]) -> dict[str, Any]:
         if self.policy.ensure_scenario(parse_observation(observation)):
             self.last_graph_state = None
         if self.graph is not None:
             if self.use_langgraph:
-                from .langgraph_adapter import build_langgraph, initial_langgraph_state
+                from .langgraph_adapter import initial_langgraph_state
 
-                app = build_langgraph(self.graph)
-                result = app.invoke(initial_langgraph_state(observation, self.policy.max_steps))
+                if self.langgraph_app is None:
+                    raise RuntimeError("LangGraph app was not initialized")
+                result = self.langgraph_app.invoke(initial_langgraph_state(observation, self.policy.max_steps))
                 state = result["graph_state"]
                 action = result["action"]
             else:

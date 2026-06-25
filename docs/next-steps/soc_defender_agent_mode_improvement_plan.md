@@ -4,9 +4,32 @@
 
 Improve `soc_defender` in separate implementation sessions so each step is measurable and easier to validate. The priority order is: OpenSec agent-mode integration, architecture hardening, calibrated evidence scoring, attribution fixes, metrics/ablations, then advisory RAG and fine-tuning. OpenSec's eval runner owns benchmark execution and scoring; `soc_defender` owns agent behavior.
 
+## Current Status
+
+- Phase 1: Complete.
+  - Verified `opensec-env/configs/soc_defender_agents.yaml` contains OpenSec `provider: agent` configs for `evidence_gate_only`, `full_agentic`, and `full_agentic_langgraph`.
+  - Verified `opensec-env/scripts/agent.py` caches agent instances and calls `act(observation)` or `next_action(observation)`.
+  - Verified `soc_defender/README.md` directs benchmark claims and reported metrics through `opensec-env/scripts/eval.py` and `opensec-env/outputs`.
+  - Smoke passed: `py -3.13 scripts\eval.py --config configs\soc_defender_agents.yaml --models evidence_gate_only --split train --limit 1 --output outputs\agents\evidence_gate_only_phase1_phase2_smoke.jsonl`.
+  - Smoke passed: `py -3.13 scripts\eval.py --config configs\soc_defender_agents.yaml --models full_agentic --split train --limit 1 --output outputs\agents\full_agentic_phase1_phase2_smoke.jsonl`.
+- Phase 2: Complete.
+  - Verified `DefenderPolicy.ensure_scenario()` detects `scenario_id` changes and resets mutable episode state.
+  - Verified reset covers registry, report tracker, fetched email IDs, fetched alert IDs, attempted containment, and SQL planner state.
+  - Verified `SocDefenderAgent.act()` clears stale graph trace state when a new scenario starts.
+  - Focused tests passed: `py -m pytest soc_defender\tests\test_agent.py -q`.
+- Phase 3: Complete.
+  - Added taint-aware trusted action support in the evidence registry.
+  - Prevented tainted evidence from populating report values or authorizing containment.
+  - Added public policy methods for graph/responder ingestion, deadlines, containment, fallback investigation, and reporting.
+  - Moved LangGraph compilation to agent construction so compiled graphs are reused per agent instance.
+  - Restricted SQL planner output to fixed broad templates and allowlisted entity templates.
+  - Tests passed: `py -m pytest tests -q` from `soc_defender`.
+  - OpenSec smokes passed for `evidence_gate_only` and `full_agentic` train limit 1.
+- Next phase: Phase 4, Evidence Scoring and Calibration.
+
 Before implementation starts, save this complete plan to:
 
-`opensec-env/docs/next-steps/soc_defender_agent_mode_improvement_plan.md`
+`soc_defender/docs/next-steps/soc_defender_agent_mode_improvement_plan.md`
 
 The implementer should prompt the user to switch to a new session at the end of each implementation session, once that session's acceptance criteria pass or its blocker is documented.
 
@@ -16,7 +39,7 @@ TODO:
 
 - Save the complete approved plan before making implementation changes.
 - Target path:
-  - `opensec-env/docs/next-steps/soc_defender_agent_mode_improvement_plan.md`
+  - `soc_defender/docs/next-steps/soc_defender_agent_mode_improvement_plan.md`
 - Include:
   - full phased plan;
   - session split;
@@ -27,7 +50,7 @@ TODO:
 
 Acceptance criteria:
 
-- The complete plan is committed/saved in `opensec-env/docs/next-steps`.
+- The complete plan is committed/saved in `soc_defender/docs/next-steps`.
 - The saved plan matches the approved implementation plan.
 - Implementation begins only after this file is present.
 
@@ -71,6 +94,8 @@ Use separate sessions rather than one long implementation session.
 
 ## Phase 1: OpenSec Eval Integration
 
+Status: Complete.
+
 Goal: use only OpenSec's benchmark eval path for reported results.
 
 TODO:
@@ -99,6 +124,8 @@ Acceptance criteria:
 
 ## Phase 2: Scenario-Scoped Agent State
 
+Status: Complete.
+
 Goal: make cached OpenSec agent-mode execution safe.
 
 TODO:
@@ -117,6 +144,8 @@ Acceptance criteria:
 - OpenSec agent-mode cache does not cause train/eval contamination.
 
 ## Phase 3: Architecture Hardening
+
+Status: Complete.
 
 Goal: enforce scanner, registry, verifier, graph, and responder boundaries.
 
@@ -319,7 +348,7 @@ Acceptance criteria:
 
 ## Assumptions
 
-- Before implementation starts, the complete plan is saved under `opensec-env/docs/next-steps`.
+- Before implementation starts, the complete plan is saved under `soc_defender/docs/next-steps`.
 - The implementer prompts the user to switch sessions after each session's acceptance criteria pass or a blocker is documented.
 - `opensec-env/scripts/eval.py` is the canonical benchmark runner.
 - `opensec-env/scripts/agent.py` remains the bridge from OpenSec eval to `soc_defender`.

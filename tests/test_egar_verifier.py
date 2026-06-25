@@ -32,4 +32,4 @@ def test_gate_rejects_support_only_from_localized_injection_span():
     decision = gate_containment("block_domain", "evil.example", registry, step_index=8, containment_min_step=5)
 
     assert decision.approved is False
-    assert decision.reason == "support only appears in flagged scanner spans"
+    assert decision.reason == "no trusted untainted content-exposed support"

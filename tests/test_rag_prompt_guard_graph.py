@@ -1,3 +1,5 @@
+import inspect
+
 from defender import SocDefenderAgent
 from defender.graph import DefenderGraph
 from defender.investigator import Investigator, LLMVerifier
@@ -87,6 +89,48 @@ def test_graph_returns_action_and_audit_traces():
         "verifier",
         "responder",
     ]
+
+
+def test_graph_uses_public_policy_interfaces_only():
+    source = inspect.getsource(DefenderGraph)
+
+    assert "policy._" not in source
+
+
+def test_langgraph_adapter_compiles_once_per_agent(monkeypatch):
+    class FakeApp:
+        def __init__(self):
+            self.invokes = 0
+
+        def invoke(self, state):
+            self.invokes += 1
+            return {"graph_state": state["graph_state"], "action": {"action_type": "query_logs", "params": {"sql": "SELECT * FROM alerts ORDER BY step DESC LIMIT 20"}}}
+
+    fake_app = FakeApp()
+    compile_calls = []
+
+    def fake_build_langgraph(graph):
+        compile_calls.append(graph)
+        return fake_app
+
+    import defender.langgraph_adapter as adapter
+
+    monkeypatch.setattr(adapter, "build_langgraph", fake_build_langgraph)
+    agent = SocDefenderAgent(mode="full_agentic", max_steps=15, use_langgraph=True)
+
+    for step in (0, 1):
+        agent.act(
+            {
+                "scenario_id": "s-1",
+                "step_index": step,
+                "new_alerts": [],
+                "containment": {},
+                "last_action_result": {"ok": True, "message": "reset", "data": {}},
+            }
+        )
+
+    assert compile_calls == [agent.graph]
+    assert fake_app.invokes == 2
 
 
 def test_full_agentic_agent_keeps_last_graph_state():

@@ -63,18 +63,7 @@ class DefenderGraph:
 
     def _registry_node(self, state: DefenderGraphState) -> None:
         parsed = state.parsed_observation or parse_observation(state.observation)
-        before = len(self.policy.registry.supports)
-        self.policy.registry.update_from_observation(parsed)
-        self.policy.report_tracker.update(self.policy.registry)
-        self.policy._record_failed_query(parsed)
-        state.append_trace(
-            "registry",
-            {
-                "supports_before_action": before,
-                "supports_after_update": len(self.policy.registry.supports),
-                "report_values": dict(self.policy.report_tracker.values),
-            },
-        )
+        state.append_trace("registry", self.policy.ingest_observation(parsed))
 
     def _rag_query_node(self, state: DefenderGraphState) -> None:
         plan = self.rag_query_planner.plan(state.observation, self.policy.registry, self.policy.report_tracker)
@@ -118,7 +107,7 @@ class DefenderGraph:
         state.append_trace("investigator", state.investigation_intent)
 
     def _budget_node(self, state: DefenderGraphState) -> None:
-        deadline = self.policy._report_deadline_step()
+        deadline = self.policy.deadline_step()
         state.budget_state = budget_state(
             step_index=state.open_sec_step_index,
             max_steps=self.policy.max_steps,

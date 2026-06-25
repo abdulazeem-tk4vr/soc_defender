@@ -38,20 +38,20 @@ class Responder:
     ) -> tuple[Any, VerifiedActionCandidate]:
         verified = self._verify_candidate(parsed, candidate)
 
-        if parsed.step_index >= self.policy._report_deadline_step():
-            return submit_report(self.policy.report_tracker.report(parsed.containment)), verified
+        if self.policy.should_submit_deadline_report(parsed):
+            return submit_report(self.policy.build_report(parsed.containment)), verified
 
         if verified.action_type == "submit_report" and self.policy.report_tracker.is_complete():
-            return submit_report(self.policy.report_tracker.report(parsed.containment)), verified
+            return submit_report(self.policy.build_report(parsed.containment)), verified
 
-        report_fill_phase = parsed.step_index >= self.policy._report_deadline_step() - 2
+        report_fill_phase = parsed.step_index >= self.policy.early_report_step()
         if verified.gate_decision and verified.gate_decision.approved and verified.entity_value and not report_fill_phase:
             builder = CONTAINMENT_BUILDERS[verified.action_type]
-            self.policy.attempted_containment.add((verified.action_type, verified.entity_value))
+            self.policy.mark_containment_attempted(verified.action_type, verified.entity_value)
             return builder(verified.entity_value), verified
 
-        if self.policy._containment_window_open(parsed.step_index):
-            containment = self.policy._next_gated_containment(parsed.step_index, parsed.containment)
+        if self.policy.containment_window_open(parsed.step_index):
+            containment = self.policy.next_gated_containment(parsed.step_index, parsed.containment)
             if containment is not None:
                 return containment, verified
 
@@ -59,11 +59,11 @@ class Responder:
         if action is not None:
             return action, verified
 
-        unseen = self.policy._next_unseen_fetch(parsed)
+        unseen = self.policy.next_unseen_fetch(parsed)
         if unseen is not None:
             return unseen, verified
 
-        return self.policy._investigate(parsed), verified
+        return self.policy.investigate(parsed), verified
 
     def _verify_candidate(
         self,

@@ -27,27 +27,37 @@ class DefenderPolicy:
 
     def next_action(self, observation: dict[str, Any]):
         parsed = parse_observation(observation)
-        self.ensure_scenario(parsed)
-        self.registry.update_from_observation(parsed)
-        self.report_tracker.update(self.registry)
-        self._record_failed_query(parsed)
+        self.ingest_observation(parsed)
 
-        if parsed.step_index >= self._report_deadline_step():
-            return submit_report(self.report_tracker.report(parsed.containment))
+        if self.should_submit_deadline_report(parsed):
+            return submit_report(self.build_report(parsed.containment))
 
-        action = self._next_unseen_fetch(parsed)
+        action = self.next_unseen_fetch(parsed)
         if action is not None:
             return action
 
-        if self._containment_window_open(parsed.step_index):
-            containment = self._next_gated_containment(parsed.step_index, parsed.containment)
+        if self.containment_window_open(parsed.step_index):
+            containment = self.next_gated_containment(parsed.step_index, parsed.containment)
             if containment is not None:
                 return containment
 
-        if parsed.step_index >= self._early_report_step() and self.report_tracker.is_complete():
-            return submit_report(self.report_tracker.report(parsed.containment))
+        if self.should_submit_complete_report(parsed):
+            return submit_report(self.build_report(parsed.containment))
 
-        return self._investigate(parsed)
+        return self.investigate(parsed)
+
+    def ingest_observation(self, observation: ParsedObservation | dict[str, Any]) -> dict[str, Any]:
+        parsed = observation if isinstance(observation, ParsedObservation) else parse_observation(observation)
+        self.ensure_scenario(parsed)
+        supports_before = len(self.registry.supports)
+        self.registry.update_from_observation(parsed)
+        self.report_tracker.update(self.registry)
+        self.record_failed_query(parsed)
+        return {
+            "supports_before_action": supports_before,
+            "supports_after_update": len(self.registry.supports),
+            "report_values": dict(self.report_tracker.values),
+        }
 
     def ensure_scenario(self, observation: ParsedObservation | dict[str, Any]) -> bool:
         parsed = observation if isinstance(observation, ParsedObservation) else parse_observation(observation)
@@ -71,7 +81,7 @@ class DefenderPolicy:
         self.attempted_containment.clear()
         self.current_scenario_id = scenario_id
 
-    def _next_unseen_fetch(self, parsed):
+    def next_unseen_fetch(self, parsed):
         for alert_id in parsed.new_alerts:
             if alert_id not in self.fetched_alerts:
                 self.fetched_alerts.add(alert_id)
@@ -82,7 +92,7 @@ class DefenderPolicy:
                 return fetch_email(email_id)
         return None
 
-    def _next_gated_containment(self, step_index: int, containment: dict[str, list[str]]):
+    def next_gated_containment(self, step_index: int, containment: dict[str, list[str]]):
         candidates = [
             (
                 "block_domain",
@@ -124,7 +134,7 @@ class DefenderPolicy:
                 return builder(entity_value)
         return None
 
-    def _investigate(self, parsed):
+    def investigate(self, parsed):
         report_gaps = {key for key, value in self.report_tracker.values.items() if value == "unknown"}
         if "attacker_domain" in report_gaps and not self.registry.best_entities("domain"):
             return self.sql_planner.action_for_sql(self.sql_planner.next_broad_query(report_gaps))
@@ -140,23 +150,44 @@ class DefenderPolicy:
                     return action
         return self.sql_planner.action_for_sql(self.sql_planner.next_broad_query(report_gaps))
 
-    def _record_failed_query(self, parsed) -> None:
+    def record_failed_query(self, parsed) -> None:
         result = parsed.last_action_result or {}
         data = result.get("data") or {}
         if result.get("message") == "query_logs" and data.get("ok") is False:
             if self.sql_planner.last_emitted_sql:
                 self.sql_planner.record_failure(self.sql_planner.last_emitted_sql)
 
-    def _report_deadline_step(self) -> int:
+    def deadline_step(self) -> int:
         if self.report_deadline_step is not None:
             return min(self.report_deadline_step, self.max_steps - 1)
         return self.max_steps - 1
 
-    def _early_report_step(self) -> int:
-        return max(0, self._report_deadline_step() - 2)
+    def early_report_step(self) -> int:
+        return max(0, self.deadline_step() - 2)
 
-    def _containment_window_open(self, step_index: int) -> bool:
+    def containment_window_open(self, step_index: int) -> bool:
         if self.report_tracker.is_complete():
             return step_index >= self.containment_min_step
-        late_containment_step = max(self.containment_min_step, self._report_deadline_step() - 3)
+        late_containment_step = max(self.containment_min_step, self.deadline_step() - 3)
         return step_index >= late_containment_step
+
+    def should_submit_deadline_report(self, parsed) -> bool:
+        return parsed.step_index >= self.deadline_step()
+
+    def should_submit_complete_report(self, parsed) -> bool:
+        return parsed.step_index >= self.early_report_step() and self.report_tracker.is_complete()
+
+    def build_report(self, containment: dict[str, Any]) -> dict[str, Any]:
+        return self.report_tracker.report(containment)
+
+    def mark_containment_attempted(self, action_type: str, entity_value: str) -> None:
+        self.attempted_containment.add((action_type, entity_value))
+
+    # Backward-compatible aliases for older tests and local helper code.
+    _next_unseen_fetch = next_unseen_fetch
+    _next_gated_containment = next_gated_containment
+    _investigate = investigate
+    _record_failed_query = record_failed_query
+    _report_deadline_step = deadline_step
+    _early_report_step = early_report_step
+    _containment_window_open = containment_window_open

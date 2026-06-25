@@ -1,3 +1,5 @@
+import pytest
+
 from defender import SocDefenderAgent, build_agent
 from defender.llm import StaticJSONLLMClient
 
@@ -83,9 +85,8 @@ def test_full_agentic_disables_prompt_guard2_by_default():
 
 
 def test_build_agent_accepts_optional_langgraph_flag():
-    agent = build_agent(mode="full_agentic", max_steps=15, use_langgraph=True)
-
-    assert agent.use_langgraph is True
+    with pytest.raises(RuntimeError, match="Install langgraph"):
+        build_agent(mode="full_agentic", max_steps=15, use_langgraph=True)
 
 
 def test_cached_agent_resets_policy_state_between_scenarios():

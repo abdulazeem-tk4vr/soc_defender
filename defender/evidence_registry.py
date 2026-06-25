@@ -50,6 +50,14 @@ class EntitySupport:
     def trusted(self) -> bool:
         return self.trust_tier != "untrusted"
 
+    @property
+    def tainted(self) -> bool:
+        return self.scanner_status in {"flagged", "suspicious", "localized"} or bool(self.localized_spans)
+
+    @property
+    def trusted_action_support(self) -> bool:
+        return self.trusted and self.content_exposed and not self.tainted
+
 
 def _text_from_row(row: dict[str, Any]) -> str:
     return " ".join(str(v) for v in row.values() if v is not None)
@@ -167,6 +175,9 @@ class EvidenceRegistry:
             if support.entity_value == entity_value and (entity_type is None or support.entity_type == entity_type)
         ]
 
+    def trusted_support_for(self, entity_value: str, entity_type: str | None = None) -> list[EntitySupport]:
+        return [support for support in self.support_for(entity_value, entity_type) if support.trusted_action_support]
+
     def best_entities(self, entity_type: str) -> list[str]:
         seen: list[str] = []
         for support in self.ranked_supports(entity_type):
@@ -178,7 +189,7 @@ class EvidenceRegistry:
         supports = [
             support
             for support in self.supports
-            if support.entity_type == entity_type and support.trusted and support.content_exposed
+            if support.entity_type == entity_type and support.trusted_action_support
         ]
         return sorted(supports, key=self._support_rank, reverse=True)
 
