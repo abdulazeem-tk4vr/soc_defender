@@ -2,7 +2,11 @@
 
 AI-assisted SOC alert triage and response evaluation platform.
 
-SOC Defender is a production-style cybersecurity automation project for building, testing, and evaluating agentic SOC workflows. It integrates evidence-gated response logic, optional RAG, LLM-backed defender modes, prompt-injection safeguards, and OpenSec-compatible evaluation tooling so security agents can be measured against repeatable incident-response scenarios.
+SOC Defender is a production-style cybersecurity automation project for building,
+testing, and evaluating agentic SOC workflows. It provides OpenSec-compatible
+agent modes, evidence tracking, evidence-gated response logic, optional RAG and
+LLM-backed workflows, prompt-injection safeguards, structured reporting, and
+focused tests for repeatable incident-response evaluation.
 
 The project is designed around a practical SOC problem: alerts are noisy, context is scattered across logs and security documentation, and autonomous agents must not take containment actions unless their decisions are grounded in trustworthy evidence.
 
@@ -57,13 +61,27 @@ py -m pip install -e ".[dev]"
 py -m pytest -q
 ```
 
-Run a deterministic smoke evaluation:
+Run benchmark smoke evals through OpenSec's canonical agent-mode runner:
+
+```powershell
+cd ..\opensec-env
+py scripts\eval.py --config configs\soc_defender_agents.yaml --models evidence_gate_only --split train --limit 5
+py scripts\eval.py --config configs\soc_defender_agents.yaml --models full_agentic --split eval --limit 5 --output outputs\agents\full_agentic_eval_smoke.jsonl
+```
+
+Use `opensec-env\scripts\eval.py` and outputs under `opensec-env\outputs` for
+benchmark claims and reported metrics. Agent-provider runs default to
+`opensec-env\outputs\agents`; LLM-provider runs default to
+`opensec-env\outputs\llms`.
+
+Run the older sibling harness only for local development checks:
 
 ```powershell
 py scripts\eval.py --defender evidence_gate_only --no-rag --split train --limit 5 --output outputs\smoke.jsonl --summary outputs\smoke_summary.json
 ```
 
-The eval script expects an OpenSec checkout at `..\opensec-env` by default. Use `--opensec-root path\to\opensec-env` if your checkout lives elsewhere.
+The local helper expects the OpenSec checkout at `..\opensec-env` by default. Use
+`--opensec-root path\to\opensec-env` if yours lives elsewhere.
 
 ## RAG and Security Context
 

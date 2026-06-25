@@ -31,6 +31,7 @@ class DefenderGraph:
             observation=dict(observation),
         )
         state.parsed_observation = parse_observation(observation)
+        self.policy.ensure_scenario(state.parsed_observation)
         self._scanner_node(state)
         self._registry_node(state)
         self._rag_query_node(state)

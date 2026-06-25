@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+"""Local development eval helper.
+
+Benchmark reporting for soc_defender should use ../opensec-env/scripts/eval.py
+with provider: agent configs, not this sibling harness.
+"""
 from __future__ import annotations
 
 import argparse
