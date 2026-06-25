@@ -26,14 +26,15 @@ Run benchmark smoke evals through OpenSec's canonical agent-mode runner:
 
 ```powershell
 cd ..\opensec-env
-py scripts\eval.py --config configs\soc_defender_agents.yaml --models evidence_gate_only --split train --limit 5
+py scripts\eval.py --config configs\soc_defender_agents.yaml --models evidence_gate_only --split train --limit 5 --output outputs\agents\evidence_gate_only_train_smoke.jsonl
 py scripts\eval.py --config configs\soc_defender_agents.yaml --models full_agentic --split eval --limit 5 --output outputs\agents\full_agentic_eval_smoke.jsonl
 ```
 
 Use `opensec-env\scripts\eval.py` and outputs under `opensec-env\outputs` for
-benchmark claims and reported metrics. Agent-provider runs default to
-`opensec-env\outputs\agents`; LLM-provider runs default to
-`opensec-env\outputs\llms`.
+benchmark claims and reported metrics. Always pass `--output` explicitly. For
+agentic/full-agentic runs, include `agentic` in the JSONL filename, for example
+`outputs\agents\full_agentic_train.jsonl`; the summary will default to the same
+name with `_summary.json` appended unless `--summary` is also supplied.
 
 Run the older sibling harness only for local development checks:
 

@@ -54,7 +54,16 @@ Improve `soc_defender` in separate implementation sessions so each step is measu
   - Focused analyzer tests passed: `py -m pytest tests\test_analyze_failures.py -q`.
   - Full tests passed: `py -m pytest -q`.
   - OpenSec ablation smoke passed: `py -3.13 scripts\eval.py --config configs\soc_defender_ablations.yaml --models full_agentic_no_llm --split train --limit 1 --output outputs\agents\full_agentic_no_llm_phase6_smoke.jsonl`.
-- Next phase: Phase 7, RAG as Advisory Context.
+- Phase 7: Complete.
+  - Added explicit advisory-only RAG document metadata, including corpus provenance and `containment_authority=false`.
+  - Prioritized RAG corpora as ATT&CK, Sigma, D3FEND, then CWE for tied keyword results.
+  - Added graph trace metadata so retrieved context shows corpus and containment-authority status.
+  - Updated investigator and verifier prompts to state that RAG is background context, not incident evidence, and cannot authorize containment.
+  - Kept OpenSec config and agent bridge unchanged; RAG/no-RAG variants can be exercised inside `soc_defender` without more benchmark-runner logic.
+  - Removed OpenSec eval provider-specific default output routing and documented explicit `--output` naming in `soc_defender/README.md`.
+  - Focused RAG/graph tests passed: `py -m pytest tests\test_rag_prompt_guard_graph.py -q`.
+  - Full `soc_defender` tests passed: `py -m pytest -q`.
+- Next phase: Phase 8, Fine-Tuning / Model-Assisted Scoring.
 
 Before implementation starts, save this complete plan to:
 
@@ -358,15 +367,20 @@ Acceptance criteria:
 
 ## Test Plan
 
-- Unit tests:
-  - scenario reset clears mutable state under cached agent reuse;
-  - tainted evidence is stored but not trusted;
-  - trusted corroboration can recover IOCs from tainted contexts;
-  - containment requires exact trusted content-exposed support;
-  - report fields require calibrated trusted support;
-  - graph uses public policy methods;
-  - SQL planner emits only safe templates;
-  - report containment mirrors executed containment.
+  - Unit tests:
+    - scenario reset clears mutable state under cached agent reuse;
+    - tainted evidence is stored but not trusted;
+    - trusted corroboration can recover IOCs from tainted contexts;
+    - containment requires exact trusted content-exposed support;
+    - report fields require calibrated trusted support;
+    - RAG context is marked advisory-only and never treated as containment authority;
+    - RAG corpus priority ranks ATT&CK, Sigma, and D3FEND above CWE when scores tie;
+    - RAG graph traces include corpus provenance and containment-authority status;
+    - investigator and verifier prompts state that RAG cannot authorize containment;
+    - RAG-only or CWE-only containment candidates are rejected by the evidence gate;
+    - graph uses public policy methods;
+    - SQL planner emits only safe templates;
+    - report containment mirrors executed containment.
 - Golden train-seed tests:
   - injected decoy domain is not blocked;
   - real exfil domain is blocked only after trusted netflow/alert evidence;

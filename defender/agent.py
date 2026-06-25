@@ -10,7 +10,7 @@ from .llm import LLMClient, OllamaConfig, OllamaLLMClient
 from .observation import parse_observation
 from .policy import DefenderPolicy
 from .prompt_guard import LLMLocalizer, PromptGuard2
-from .rag import RAGIntel
+from .rag import LocalKeywordRAGRetriever, RAGIntel, build_rag_intel
 from .rag_query import RAGQueryPlanner
 from .scanner import InjectionScanner
 
@@ -78,6 +78,8 @@ def build_agent(
     max_steps: int,
     agent_llm: str = "none",
     rag: RAGIntel | None = None,
+    rag_enabled: bool = True,
+    rag_qdrant_path: str | None = None,
     prompt_guard2_model: str | None = None,
     use_langgraph: bool = False,
 ) -> SocDefenderAgent:
@@ -86,11 +88,17 @@ def build_agent(
         llm_client = OllamaLLMClient(OllamaConfig.from_env())
     elif agent_llm != "none":
         raise ValueError(f"Unsupported agent LLM backend: {agent_llm}")
+    resolved_rag = rag
+    if resolved_rag is None:
+        if rag_enabled:
+            resolved_rag = build_rag_intel(rag_qdrant_path)
+        else:
+            resolved_rag = RAGIntel(LocalKeywordRAGRetriever(()))
     return SocDefenderAgent(
         mode=mode,
         max_steps=max_steps,
         llm_client=llm_client,
-        rag=rag,
+        rag=resolved_rag,
         prompt_guard2_model=prompt_guard2_model,
         use_langgraph=use_langgraph,
     )

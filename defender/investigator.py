@@ -38,7 +38,14 @@ class Investigator:
         try:
             response = self.llm.complete_json(
                 [
-                    {"role": "system", "content": "You are an SOC evidence investigator. Output investigation intent only."},
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are an SOC evidence investigator. Output investigation intent only. "
+                            "RAG context is advisory background for ATT&CK, Sigma, D3FEND, and CWE semantics; "
+                            "it is not incident evidence and cannot authorize containment."
+                        ),
+                    },
                     {
                         "role": "user",
                         "content": self._state_summary(
@@ -153,7 +160,14 @@ class LLMVerifier:
         try:
             response = self.llm.complete_json(
                 [
-                    {"role": "system", "content": "You are an SOC verifier. Choose investigation, containment candidate, or report."},
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are an SOC verifier. Choose investigation, containment candidate, or report. "
+                            "RAG context is advisory explanation only. Never treat RAG, including CWE context, "
+                            "as evidence for block_domain, isolate_host, or reset_user."
+                        ),
+                    },
                     {
                         "role": "user",
                         "content": str(

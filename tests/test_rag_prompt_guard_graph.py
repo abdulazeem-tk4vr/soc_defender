@@ -21,6 +21,21 @@ def test_keyword_rag_returns_ranked_context():
     docs = retriever.retrieve("exfiltration dst_domain")
 
     assert docs[0].title == "Exfiltration"
+    assert docs[0].containment_authority is False
+
+
+def test_keyword_rag_uses_corpus_priority_for_ties():
+    retriever = LocalKeywordRAGRetriever(
+        (
+            RAGDocument("cwe", "CWE note", "credential exfiltration", corpus="cwe"),
+            RAGDocument("attack", "ATT&CK note", "credential exfiltration", corpus="attack"),
+            RAGDocument("sigma", "Sigma note", "credential exfiltration", corpus="sigma"),
+        )
+    )
+
+    docs = retriever.retrieve("credential exfiltration")
+
+    assert [doc.corpus for doc in docs] == ["attack", "sigma", "cwe"]
 
 
 def test_prompt_guard_and_localizer_are_deterministic_without_llm():
@@ -214,6 +229,63 @@ def test_rag_context_reaches_investigator_prompt():
     assert "rag_context" in prompt
     assert "Domain TTP" in prompt
     assert "budget" in prompt
+    assert llm.traces[0].messages[0]["content"].count("cannot authorize containment") == 1
+
+
+def test_rag_trace_marks_context_as_advisory_only():
+    graph = DefenderGraph(
+        policy=DefenderPolicy(max_steps=15),
+        rag=RAGIntel(LocalKeywordRAGRetriever((RAGDocument("fixture", "D3FEND label", "containment isolate host", corpus="d3fend"),))),
+    )
+
+    _, state = graph.next_action(
+        {
+            "scenario_id": "s-1",
+            "step_index": 1,
+            "attacker_state": "containment isolate host",
+            "new_alerts": [],
+            "containment": {},
+            "last_action_result": {"ok": True, "message": "reset", "data": {}},
+        }
+    )
+
+    assert state.rag_context[0]["corpus"] == "d3fend"
+    assert state.rag_context[0]["containment_authority"] is False
+    rag_trace = next(trace for trace in state.traces if trace.node == "rag")
+    assert rag_trace.output_summary["top_documents"][0]["containment_authority"] is False
+
+
+def test_rag_only_containment_candidate_is_rejected_by_evidence_gate():
+    graph = DefenderGraph(
+        policy=DefenderPolicy(max_steps=15, containment_min_step=0),
+        rag=RAGIntel(LocalKeywordRAGRetriever((RAGDocument("cwe", "CWE domain", "evil.example weakness context", corpus="cwe"),))),
+        investigator=Investigator(StaticJSONLLMClient({"intent_type": "query_logs", "entity_type": "domain", "entity_value": "evil.example"})),
+        verifier=LLMVerifier(
+            StaticJSONLLMClient(
+                {
+                    "action_type": "block_domain",
+                    "entity_value": "evil.example",
+                    "rationale": "RAG mentions domain",
+                    "confidence": 0.99,
+                }
+            )
+        ),
+    )
+
+    action, state = graph.next_action(
+        {
+            "scenario_id": "s-1",
+            "step_index": 5,
+            "attacker_state": "evil.example",
+            "new_alerts": [],
+            "containment": {},
+            "last_action_result": {"ok": True, "message": "reset", "data": {}},
+        }
+    )
+
+    assert action["action_type"] == "query_logs"
+    assert state.gate_decision["approved"] is False
+    assert state.gate_decision["reason"] == "exact entity not observed in evidence"
 
 
 def test_graph_calls_investigator_once_per_step():

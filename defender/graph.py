@@ -90,7 +90,15 @@ class DefenderGraph:
             {
                 "query": query,
                 "documents": len(docs),
-                "top_documents": [{"source": doc.source, "title": doc.title} for doc in docs[:3]],
+                "top_documents": [
+                    {
+                        "source": doc.source,
+                        "title": doc.title,
+                        "corpus": doc.corpus,
+                        "containment_authority": doc.containment_authority,
+                    }
+                    for doc in docs[:3]
+                ],
             },
         )
 

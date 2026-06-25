@@ -14,6 +14,19 @@ class RAGDocument:
     title: str
     text: str
     score: float = 0.0
+    corpus: str = "unknown"
+    purpose: str = "advisory_context"
+    containment_authority: bool = False
+
+
+CORPUS_PRIORITY = {
+    "attack": 0,
+    "sigma": 1,
+    "d3fend": 2,
+    "cwe": 3,
+    "builtin": 4,
+    "unknown": 5,
+}
 
 
 class RAGRetriever:
@@ -37,8 +50,18 @@ class LocalKeywordRAGRetriever(RAGRetriever):
             haystack = f"{doc.title} {doc.text}".casefold()
             score = sum(1 for term in terms if term in haystack)
             if score:
-                scored.append(RAGDocument(doc.source, doc.title, doc.text, float(score)))
-        scored.sort(key=lambda doc: doc.score, reverse=True)
+                scored.append(
+                    RAGDocument(
+                        doc.source,
+                        doc.title,
+                        doc.text,
+                        float(score),
+                        corpus=doc.corpus,
+                        purpose=doc.purpose,
+                        containment_authority=False,
+                    )
+                )
+        scored.sort(key=lambda doc: (-doc.score, CORPUS_PRIORITY.get(doc.corpus, CORPUS_PRIORITY["unknown"])))
         return tuple(scored[:limit])
 
 
@@ -76,17 +99,19 @@ class QdrantRAGRetriever(RAGRetriever):
                     title=str(payload.get("title") or payload.get("chunk_id") or "RAG chunk"),
                     text=str(payload.get("text") or ""),
                     score=float(hit.score),
+                    corpus=infer_corpus(str(payload.get("source_path") or payload.get("source") or "")),
+                    containment_authority=False,
                 )
             )
-        return tuple(docs)
+        return tuple(sorted(docs, key=lambda doc: (-doc.score, CORPUS_PRIORITY.get(doc.corpus, CORPUS_PRIORITY["unknown"]))))
 
 
 def default_security_corpus() -> tuple[RAGDocument, ...]:
     return (
-        RAGDocument("builtin", "Phishing Initial Access", "Phishing commonly yields compromised users and patient-zero hosts."),
-        RAGDocument("builtin", "Exfiltration Evidence", "Exfiltration evidence often appears in alerts or netflow with dst_domain and bytes."),
-        RAGDocument("builtin", "Data Staging Evidence", "Data staging evidence often appears in process events with target identifiers."),
-        RAGDocument("builtin", "Containment", "Containment should isolate exact hosts, reset exact users, and block exact attacker domains only after support."),
+        RAGDocument("builtin", "Phishing Initial Access", "Phishing commonly yields compromised users and patient-zero hosts.", corpus="attack"),
+        RAGDocument("builtin", "Exfiltration Evidence", "Exfiltration evidence often appears in alerts or netflow with dst_domain and bytes.", corpus="sigma"),
+        RAGDocument("builtin", "Data Staging Evidence", "Data staging evidence often appears in process events with target identifiers.", corpus="sigma"),
+        RAGDocument("builtin", "Containment", "D3FEND containment labels describe response choices but do not authorize actions.", corpus="d3fend"),
     )
 
 
@@ -95,7 +120,34 @@ class RAGIntel:
     retriever: RAGRetriever = field(default_factory=lambda: LocalKeywordRAGRetriever(default_security_corpus()))
 
     def context_for(self, query: str, limit: int = 5) -> tuple[RAGDocument, ...]:
-        return self.retriever.retrieve(query, limit=limit)
+        docs = self.retriever.retrieve(query, limit=limit)
+        return tuple(
+            RAGDocument(
+                doc.source,
+                doc.title,
+                doc.text,
+                doc.score,
+                corpus=doc.corpus or infer_corpus(doc.source),
+                purpose=doc.purpose or "advisory_context",
+                containment_authority=False,
+            )
+            for doc in docs
+        )
+
+
+def infer_corpus(source: str) -> str:
+    normalized = source.replace("\\", "/").casefold()
+    if "attack" in normalized or "mitre" in normalized:
+        return "attack"
+    if "sigma" in normalized:
+        return "sigma"
+    if "d3fend" in normalized:
+        return "d3fend"
+    if "cwe" in normalized:
+        return "cwe"
+    if "builtin" in normalized:
+        return "builtin"
+    return "unknown"
 
 
 def build_rag_intel(
