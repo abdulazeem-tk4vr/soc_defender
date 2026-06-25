@@ -7,6 +7,7 @@ from .graph import DefenderGraph
 from .graph_state import DefenderGraphState
 from .investigator import Investigator, LLMVerifier
 from .llm import LLMClient, OllamaConfig, OllamaLLMClient
+from .observation import parse_observation
 from .policy import DefenderPolicy
 from .prompt_guard import LLMLocalizer, PromptGuard2
 from .rag import RAGIntel
@@ -43,6 +44,8 @@ class SocDefenderAgent:
             )
 
     def act(self, observation: dict[str, Any]) -> dict[str, Any]:
+        if self.policy.ensure_scenario(parse_observation(observation)):
+            self.last_graph_state = None
         if self.graph is not None:
             if self.use_langgraph:
                 from .langgraph_adapter import build_langgraph, initial_langgraph_state

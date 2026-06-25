@@ -5,7 +5,7 @@ from typing import Any
 
 from .actions import block_domain, fetch_alert, fetch_email, isolate_host, reset_user, submit_report
 from .evidence_registry import EvidenceRegistry
-from .observation import parse_observation
+from .observation import ParsedObservation, parse_observation
 from .report_readiness import ReportReadinessTracker
 from .sql_planner import SQLPlanner
 from .verifier import gate_containment
@@ -23,9 +23,11 @@ class DefenderPolicy:
     fetched_emails: set[str] = field(default_factory=set)
     fetched_alerts: set[str] = field(default_factory=set)
     attempted_containment: set[tuple[str, str]] = field(default_factory=set)
+    current_scenario_id: str | None = None
 
     def next_action(self, observation: dict[str, Any]):
         parsed = parse_observation(observation)
+        self.ensure_scenario(parsed)
         self.registry.update_from_observation(parsed)
         self.report_tracker.update(self.registry)
         self._record_failed_query(parsed)
@@ -46,6 +48,28 @@ class DefenderPolicy:
             return submit_report(self.report_tracker.report(parsed.containment))
 
         return self._investigate(parsed)
+
+    def ensure_scenario(self, observation: ParsedObservation | dict[str, Any]) -> bool:
+        parsed = observation if isinstance(observation, ParsedObservation) else parse_observation(observation)
+        scenario_id = parsed.scenario_id
+        if not scenario_id:
+            return False
+        if self.current_scenario_id is None:
+            self.current_scenario_id = scenario_id
+            return False
+        if scenario_id == self.current_scenario_id:
+            return False
+        self.reset_episode_state(scenario_id)
+        return True
+
+    def reset_episode_state(self, scenario_id: str | None = None) -> None:
+        self.registry = EvidenceRegistry()
+        self.report_tracker = ReportReadinessTracker()
+        self.sql_planner = SQLPlanner()
+        self.fetched_emails.clear()
+        self.fetched_alerts.clear()
+        self.attempted_containment.clear()
+        self.current_scenario_id = scenario_id
 
     def _next_unseen_fetch(self, parsed):
         for alert_id in parsed.new_alerts:
