@@ -8,6 +8,14 @@ from .calibration import CalibrationConfig, load_calibration
 from .evidence_registry import EvidenceRegistry
 
 
+REPORT_FIELD_ENTITY_TYPES = {
+    "patient_zero_host": "host",
+    "compromised_user": "user",
+    "attacker_domain": "domain",
+    "data_target": "target",
+}
+
+
 @dataclass
 class ReportFieldState:
     value: str = "unknown"
@@ -38,7 +46,7 @@ class ReportReadinessTracker:
                 ReportFieldState(value=value, locked=value != "unknown" and field_name == "initial_vector"),
             )
 
-    def update(self, registry: EvidenceRegistry) -> None:
+    def update(self, registry: EvidenceRegistry, *, replacement_margin: float = 1.0) -> None:
         host = self._first_with_indicator(
             registry,
             "host",
@@ -53,14 +61,69 @@ class ReportReadinessTracker:
         )
         domain = self._first_with_indicator(registry, "domain", "attacker_domain", {"exfil", "phish", "alert"})
         target = self._first_with_indicator(registry, "target", "data_target", {"exfil", "staging", "alert"})
-        self._maybe_update("patient_zero_host", host)
-        self._maybe_update("compromised_user", user)
-        self._maybe_update("attacker_domain", domain)
-        self._maybe_update("data_target", target)
+        self._maybe_update("patient_zero_host", host, replacement_margin=max(replacement_margin, 2.0))
+        self._maybe_update("compromised_user", user, replacement_margin=replacement_margin)
+        self._maybe_update("attacker_domain", domain, replacement_margin=replacement_margin)
+        self._maybe_update("data_target", target, replacement_margin=replacement_margin)
         self._record_conflicts(registry, "patient_zero_host", "host")
         self._record_conflicts(registry, "compromised_user", "user")
         self._record_conflicts(registry, "attacker_domain", "domain")
         self._record_conflicts(registry, "data_target", "target")
+
+
+    def apply_verified_choices(
+        self,
+        registry: EvidenceRegistry,
+        choices: dict[str, Any],
+    ) -> dict[str, Any]:
+        accepted: dict[str, str] = {}
+        rejected: dict[str, str] = {}
+        for report_field, entity_type in REPORT_FIELD_ENTITY_TYPES.items():
+            raw_value = choices.get(report_field)
+            if raw_value in {None, "", "unknown"}:
+                continue
+            value = str(raw_value)
+            candidate = self._validated_choice(registry, report_field, entity_type, value)
+            if candidate is None:
+                rejected[report_field] = value
+                continue
+            self._apply_verified_choice(report_field, candidate)
+            accepted[report_field] = value
+        return {"accepted": accepted, "rejected": rejected}
+
+    def _apply_verified_choice(self, report_field: str, candidate: tuple[str, float, tuple[str, ...]]) -> None:
+        value, confidence, provenance = candidate
+        state = self.field_state.setdefault(report_field, ReportFieldState(value=self.values.get(report_field, "unknown")))
+        if state.value not in {"unknown", value}:
+            state.conflict_history.append(
+                {
+                    "verifier_replaced": state.value,
+                    "confidence": state.confidence,
+                    "provenance": state.provenance,
+                    "with": value,
+                }
+            )
+        state.value = value
+        state.confidence = confidence
+        state.provenance = provenance
+        state.locked = confidence >= self.calibration.report_field_threshold(report_field) + 2.0
+        self.values[report_field] = value
+
+    def _validated_choice(
+        self,
+        registry: EvidenceRegistry,
+        report_field: str,
+        entity_type: str,
+        value: str,
+    ) -> tuple[str, float, tuple[str, ...]] | None:
+        threshold = self.calibration.report_field_threshold(report_field)
+        for candidate in registry.scored_candidates(entity_type):
+            if candidate.entity_value != value:
+                continue
+            if not candidate.eligible or candidate.score < threshold:
+                return None
+            return (candidate.entity_value, candidate.score, candidate.evidence_ids)
+        return None
 
     def report(self, containment: dict[str, Any]) -> dict[str, Any]:
         payload = dict(self.values)
@@ -74,7 +137,13 @@ class ReportReadinessTracker:
     def is_complete(self) -> bool:
         return all(self.values.get(field) != "unknown" for field in self.values)
 
-    def _maybe_update(self, report_field: str, candidate: tuple[str, float, tuple[str, ...]] | None) -> None:
+    def _maybe_update(
+        self,
+        report_field: str,
+        candidate: tuple[str, float, tuple[str, ...]] | None,
+        *,
+        replacement_margin: float = 1.0,
+    ) -> None:
         if candidate is None:
             return
         value, confidence, provenance = candidate

@@ -2,13 +2,9 @@ calibration:
   status: frozen_train_initial
   tuned_on: train
   notes: "Phase 4 deterministic calibration baseline. Thresholds are conservative defaults selected before eval-split use; future tuning must use OpenSec train outputs only."
-  containment_min_step: 5
+  containment_min_step_divisor: 3
   report_deadline_step: null
   thresholds:
-    containment:
-      block_domain: 8.0
-      isolate_host: 8.0
-      reset_user: 8.0
     report_fields:
       patient_zero_host: 6.0
       compromised_user: 6.0

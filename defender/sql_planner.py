@@ -22,12 +22,12 @@ GAP_QUERY_TEMPLATES = {
     "attacker_domain": (
         "SELECT * FROM netflow WHERE dst_domain IS NOT NULL ORDER BY step DESC LIMIT 20",
         "SELECT * FROM alerts WHERE message LIKE '%dst_domain=%' ORDER BY step DESC LIMIT 20",
-        "SELECT * FROM alerts WHERE destination_domain IS NOT NULL ORDER BY step DESC LIMIT 20",
+        "SELECT * FROM alerts WHERE message LIKE '%domain=%' ORDER BY step DESC LIMIT 20",
     ),
     "data_target": (
-        "SELECT * FROM process_events WHERE target_id IS NOT NULL ORDER BY step DESC LIMIT 20",
-        "SELECT * FROM alerts WHERE message LIKE '%target=%' ORDER BY step DESC LIMIT 20",
         "SELECT * FROM process_events WHERE command_line LIKE '%exfil%' ORDER BY step DESC LIMIT 20",
+        "SELECT * FROM alerts WHERE message LIKE '%target=%' ORDER BY step DESC LIMIT 20",
+        "SELECT * FROM netflow WHERE bytes_sent IS NOT NULL ORDER BY step DESC LIMIT 20",
     ),
 }
 
@@ -35,16 +35,16 @@ ENTITY_QUERY_PATTERNS = (
     re.compile(r"^SELECT \* FROM auth_logs WHERE host_id = '[^']*(?:''[^']*)*' ORDER BY step DESC LIMIT 20$"),
     re.compile(r"^SELECT \* FROM auth_logs WHERE user_id = '[^']*(?:''[^']*)*' ORDER BY step DESC LIMIT 20$"),
     re.compile(r"^SELECT \* FROM netflow WHERE dst_domain = '[^']*(?:''[^']*)*' ORDER BY step DESC LIMIT 20$"),
-    re.compile(r"^SELECT \* FROM process_events WHERE target_id = '[^']*(?:''[^']*)*' ORDER BY step DESC LIMIT 20$"),
+    re.compile(r"^SELECT \* FROM process_events WHERE command_line LIKE '[^']*(?:''[^']*)*' ORDER BY step DESC LIMIT 20$"),
 )
 
 GAP_QUERY_PATTERNS = (
     re.compile(r"^SELECT \* FROM netflow WHERE dst_domain IS NOT NULL ORDER BY step DESC LIMIT 20$"),
     re.compile(r"^SELECT \* FROM alerts WHERE message LIKE '%dst_domain=%' ORDER BY step DESC LIMIT 20$"),
-    re.compile(r"^SELECT \* FROM alerts WHERE destination_domain IS NOT NULL ORDER BY step DESC LIMIT 20$"),
-    re.compile(r"^SELECT \* FROM process_events WHERE target_id IS NOT NULL ORDER BY step DESC LIMIT 20$"),
-    re.compile(r"^SELECT \* FROM alerts WHERE message LIKE '%target=%' ORDER BY step DESC LIMIT 20$"),
+    re.compile(r"^SELECT \* FROM alerts WHERE message LIKE '%domain=%' ORDER BY step DESC LIMIT 20$"),
     re.compile(r"^SELECT \* FROM process_events WHERE command_line LIKE '%exfil%' ORDER BY step DESC LIMIT 20$"),
+    re.compile(r"^SELECT \* FROM alerts WHERE message LIKE '%target=%' ORDER BY step DESC LIMIT 20$"),
+    re.compile(r"^SELECT \* FROM netflow WHERE bytes_sent IS NOT NULL ORDER BY step DESC LIMIT 20$"),
 )
 
 
@@ -70,18 +70,32 @@ class SQLPlanner:
     def already_emitted(self, sql: str) -> bool:
         return sql.strip() in self.emitted_queries
 
-    def action_for_sql(self, sql: str):
-        sql = self.repair(sql)
+    def action_for_sql(self, sql: str, report_gaps: set[str] | None = None):
+        sql = self.repair(sql, report_gaps=report_gaps)
         self.emitted_queries.add(sql)
         self.emitted_counts[sql] = self.emitted_counts.get(sql, 0) + 1
         self.last_emitted_sql = sql
         return query_logs(sql)
 
-    def repair(self, sql: str) -> str:
-        sql = sql.strip()
-        if is_safe_select(sql) and is_allowlisted_template(sql) and sql not in self.failed_queries and not self.already_emitted(sql):
+    def repair(self, sql: str, report_gaps: set[str] | None = None) -> str:
+        sql = self.normalize_sql(sql)
+        if is_safe_select(sql) and sql not in self.failed_queries and not self.already_emitted(sql):
             return sql
-        return self.next_broad_query()
+        return self.next_repair_query(report_gaps)
+
+    @staticmethod
+    def normalize_sql(sql: str) -> str:
+        sql = sql.strip()
+        if sql.endswith(";"):
+            return sql[:-1].strip()
+        return sql
+
+    def next_repair_query(self, report_gaps: set[str] | None = None) -> str:
+        report_gaps = report_gaps or set()
+        for report_field in ("attacker_domain", "data_target"):
+            if report_field in report_gaps:
+                return self.next_gap_query(report_field)
+        return self.next_broad_query(report_gaps)
 
     def next_broad_query(self, report_gaps: set[str] | None = None):
         report_gaps = report_gaps or set()
@@ -143,8 +157,9 @@ class SQLPlanner:
                 f"{value} ORDER BY step DESC LIMIT 20"
             )
         if entity_type == "target":
+            value = quote_sql(f"%{entity_value}%")
             return self.action_for_sql(
-                "SELECT * FROM process_events WHERE target_id = "
+                "SELECT * FROM process_events WHERE command_line LIKE "
                 f"{value} ORDER BY step DESC LIMIT 20"
             )
         return self.action_for_sql(self.next_broad_query())

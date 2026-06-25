@@ -102,6 +102,7 @@ def test_graph_returns_action_and_audit_traces():
         "budget",
         "investigator",
         "verifier",
+        "verified_report_fields",
         "responder",
     ]
 
@@ -309,20 +310,19 @@ def test_graph_calls_investigator_once_per_step():
     assert len(llm.traces) == 1
 
 
-def test_verifier_containment_rejected_by_gate_falls_back_to_investigation():
+def test_early_verifier_llm_runs_even_without_concrete_entity():
+    verifier_llm = StaticJSONLLMClient(
+        {
+            "action_type": "isolate_host",
+            "entity_value": "h-001",
+            "rationale": "requested by verifier",
+            "confidence": 0.9,
+        }
+    )
     graph = DefenderGraph(
         policy=DefenderPolicy(max_steps=15, containment_min_step=5),
-        investigator=Investigator(StaticJSONLLMClient({"intent_type": "query_logs", "entity_type": "host", "entity_value": "h-001"})),
-        verifier=LLMVerifier(
-            StaticJSONLLMClient(
-                {
-                    "action_type": "isolate_host",
-                    "entity_value": "h-001",
-                    "rationale": "requested by verifier",
-                    "confidence": 0.9,
-                }
-            )
-        ),
+        investigator=Investigator(StaticJSONLLMClient({"intent_type": "query_logs", "entity_type": "host", "entity_value": "unknown"})),
+        verifier=LLMVerifier(verifier_llm),
     )
 
     action, state = graph.next_action(
@@ -335,9 +335,10 @@ def test_verifier_containment_rejected_by_gate_falls_back_to_investigation():
         }
     )
 
+    verifier_trace = next(trace for trace in state.traces if trace.node == "verifier")
     assert action["action_type"] == "query_logs"
-    assert state.gate_decision["approved"] is False
-    assert state.gate_decision["reason"] == "containment before configured minimum step"
+    assert len(verifier_llm.traces) == 1
+    assert verifier_trace.output_summary["source"] == "llm"
 
 
 def test_rag_query_planner_uses_llm_query_when_valid():
@@ -362,7 +363,7 @@ def test_rag_query_planner_rejects_instruction_like_query():
     assert "ignore previous" not in plan.query
 
 
-def test_graph_uses_llm_planned_rag_query_for_retrieval():
+def test_graph_uses_investigator_rag_query_for_next_step_retrieval():
     class CapturingRetriever(LocalKeywordRAGRetriever):
         def __init__(self):
             super().__init__((RAGDocument("fixture", "Domain", "attacker domain netflow"),))
@@ -372,25 +373,326 @@ def test_graph_uses_llm_planned_rag_query_for_retrieval():
             self.queries.append(query)
             return super().retrieve(query, limit=limit)
 
+    planner_llm = StaticJSONLLMClient({"query": "should not be used", "rationale": "separate rag llm"})
     retriever = CapturingRetriever()
     graph = DefenderGraph(
         policy=DefenderPolicy(max_steps=15),
         rag=RAGIntel(retriever),
-        rag_query_planner=RAGQueryPlanner(StaticJSONLLMClient({"query": "attacker domain netflow evidence", "rationale": "domain gap"})),
-        investigator=Investigator(StaticJSONLLMClient({"intent_type": "query_logs"})),
+        rag_query_planner=RAGQueryPlanner(planner_llm),
+        investigator=Investigator(
+            StaticJSONLLMClient(
+                {
+                    "intent_type": "query_logs",
+                    "rag_query": "attacker domain netflow evidence",
+                    "rag_rationale": "domain gap",
+                }
+            )
+        ),
         verifier=LLMVerifier(StaticJSONLLMClient({"action_type": "investigate"})),
+    )
+    observation = {
+        "scenario_id": "s-1",
+        "new_alerts": [],
+        "containment": {},
+        "last_action_result": {"ok": True, "message": "reset", "data": {}},
+    }
+
+    graph.next_action({**observation, "step_index": 1})
+    _, state = graph.next_action({**observation, "step_index": 2})
+
+    assert planner_llm.traces == []
+    assert retriever.queries[-1] == "attacker domain netflow evidence"
+    assert state.rag_query == "attacker domain netflow evidence"
+    assert any(trace.node == "rag_query" and trace.output_summary["source"] == "investigator" for trace in state.traces)
+
+
+
+def test_graph_reuses_rag_query_and_context_when_state_is_unchanged():
+    class CapturingRetriever(LocalKeywordRAGRetriever):
+        def __init__(self):
+            super().__init__((RAGDocument("fixture", "Domain", "attacker domain netflow"),))
+            self.queries = []
+
+        def retrieve(self, query: str, limit: int = 5):
+            self.queries.append(query)
+            return super().retrieve(query, limit=limit)
+
+    planner_llm = StaticJSONLLMClient({"query": "attacker domain netflow evidence", "rationale": "domain gap"})
+    retriever = CapturingRetriever()
+    graph = DefenderGraph(
+        policy=DefenderPolicy(max_steps=15),
+        rag=RAGIntel(retriever),
+        rag_query_planner=RAGQueryPlanner(planner_llm),
+        investigator=Investigator(StaticJSONLLMClient({"intent_type": "query_logs", "rag_query": "attacker domain netflow evidence"})),
+        verifier=LLMVerifier(StaticJSONLLMClient({"action_type": "investigate"})),
+    )
+    observation = {
+        "scenario_id": "s-1",
+        "attacker_state": "persistence",
+        "new_alerts": [],
+        "new_emails": [],
+        "containment": {},
+        "last_action_result": {"ok": True, "message": "reset", "data": {}},
+    }
+
+    graph.next_action({**observation, "step_index": 5})
+    graph.next_action({**observation, "step_index": 6})
+    _, third_state = graph.next_action({**observation, "step_index": 7})
+
+    rag_query_trace = next(trace for trace in third_state.traces if trace.node == "rag_query")
+    rag_trace = next(trace for trace in third_state.traces if trace.node == "rag")
+    assert planner_llm.traces == []
+    assert retriever.queries[-1] == "attacker domain netflow evidence"
+    assert len(retriever.queries) == 2
+    assert rag_query_trace.output_summary["source"] == "investigator"
+    assert rag_query_trace.output_summary["cache_hit"] is True
+    assert rag_trace.output_summary["cache_hit"] is True
+
+
+
+def test_verifier_llm_runs_for_concrete_entity_even_before_containment_window():
+    verifier_llm = StaticJSONLLMClient({"action_type": "investigate", "entity_value": "h-001", "confidence": 0.7})
+    graph = DefenderGraph(
+        policy=DefenderPolicy(max_steps=15, containment_min_step=5),
+        investigator=Investigator(StaticJSONLLMClient({"intent_type": "query_logs", "entity_type": "host", "entity_value": "h-001"})),
+        verifier=LLMVerifier(verifier_llm),
     )
 
     _, state = graph.next_action(
         {
             "scenario_id": "s-1",
-            "step_index": 1,
+            "step_index": 2,
             "new_alerts": [],
             "containment": {},
             "last_action_result": {"ok": True, "message": "reset", "data": {}},
         }
     )
 
-    assert retriever.queries == ["attacker domain netflow evidence"]
-    assert state.rag_query == "attacker domain netflow evidence"
-    assert any(trace.node == "rag_query" and trace.output_summary["source"] == "llm" for trace in state.traces)
+    verifier_trace = next(trace for trace in state.traces if trace.node == "verifier")
+    assert len(verifier_llm.traces) == 1
+    assert verifier_trace.output_summary["source"] == "llm"
+
+
+
+
+def test_full_agentic_uses_last_pre_report_slots_for_containment_before_deadline():
+    graph = DefenderGraph(
+        policy=DefenderPolicy(max_steps=15, containment_min_step=0),
+        investigator=Investigator(StaticJSONLLMClient({"intent_type": "query_logs", "entity_type": "host", "entity_value": "h-002"})),
+        verifier=LLMVerifier(StaticJSONLLMClient({"action_type": "investigate", "entity_value": "h-002"})),
+    )
+    graph.policy.report_tracker.values.update(
+        {
+            "patient_zero_host": "h-001",
+            "compromised_user": "u-001",
+            "attacker_domain": "evil.example",
+            "data_target": "unknown",
+            "initial_vector": "phish",
+        }
+    )
+    graph.policy.registry.add_row(
+        {
+            "alert_id": "alert-host",
+            "host_id": "h-001",
+            "message": "verified credential alert",
+            "trust_tier": "verified",
+        },
+        step_seen=8,
+    )
+    graph.policy.registry.add_row(
+        {
+            "auth_id": "auth-user",
+            "user_id": "u-001",
+            "message": "verified credential alert",
+            "trust_tier": "verified",
+        },
+        step_seen=8,
+    )
+    graph.policy.registry.add_row(
+        {
+            "flow_id": "flow-domain",
+            "dst_domain": "evil.example",
+            "message": "verified exfil alert",
+            "trust_tier": "verified",
+        },
+        step_seen=8,
+    )
+
+    base_observation = {
+        "scenario_id": "s-1",
+        "new_alerts": [],
+        "new_emails": [],
+        "last_action_result": {"ok": True, "message": "query_logs", "data": {"rows": []}},
+    }
+
+    action_11, _ = graph.next_action(
+        {
+            **base_observation,
+            "step_index": 11,
+            "containment": {"isolated_hosts": [], "blocked_domains": [], "reset_users": []},
+        }
+    )
+    action_12, _ = graph.next_action(
+        {
+            **base_observation,
+            "step_index": 12,
+            "containment": {"isolated_hosts": ["h-001"], "blocked_domains": [], "reset_users": []},
+        }
+    )
+    action_13, _ = graph.next_action(
+        {
+            **base_observation,
+            "step_index": 13,
+            "containment": {"isolated_hosts": ["h-001"], "blocked_domains": ["evil.example"], "reset_users": []},
+        }
+    )
+
+    assert action_11 == {"action_type": "isolate_host", "params": {"host_id": "h-001"}}
+    assert action_12 == {"action_type": "block_domain", "params": {"domain": "evil.example"}}
+    assert action_13 == {"action_type": "reset_user", "params": {"user_id": "u-001"}}
+
+def test_report_fill_phase_allows_missing_report_aligned_containment():
+    graph = DefenderGraph(
+        policy=DefenderPolicy(max_steps=15, containment_min_step=0),
+        investigator=Investigator(StaticJSONLLMClient({"intent_type": "query_logs", "entity_type": "host", "entity_value": "h-001"})),
+        verifier=LLMVerifier(StaticJSONLLMClient({"action_type": "investigate"})),
+    )
+    graph.policy.registry.add_row(
+        {
+            "alert_id": "alert-1",
+            "host_id": "h-001",
+            "message": "malicious credential alert",
+            "trust_tier": "trusted",
+        },
+        step_seen=4,
+    )
+    graph.policy.report_tracker.update(graph.policy.registry)
+
+    action, state = graph.next_action(
+        {
+            "scenario_id": "s-1",
+            "step_index": 13,
+            "new_alerts": [],
+            "new_emails": [],
+            "containment": {"isolated_hosts": [], "blocked_domains": [], "reset_users": []},
+            "last_action_result": {"ok": True, "message": "query_logs", "data": {"rows": []}},
+        }
+    )
+
+    assert action == {"action_type": "isolate_host", "params": {"host_id": "h-001"}}
+    assert graph.policy.attempted_containment == {("isolate_host", "h-001")}
+    assert state.budget_state["phase"] == "report_fill"
+
+
+def test_report_fill_phase_does_not_add_extra_containment_for_completed_type():
+    graph = DefenderGraph(
+        policy=DefenderPolicy(max_steps=15, containment_min_step=0),
+        investigator=Investigator(StaticJSONLLMClient({"intent_type": "query_logs", "entity_type": "host", "entity_value": "h-002"})),
+        verifier=LLMVerifier(
+            StaticJSONLLMClient(
+                {
+                    "action_type": "isolate_host",
+                    "entity_value": "h-002",
+                    "confidence": 0.9,
+                }
+            )
+        ),
+    )
+    for host in ("h-001", "h-002"):
+        graph.policy.registry.add_row(
+            {
+                "alert_id": f"alert-{host}",
+                "host_id": host,
+                "message": "malicious credential alert",
+                "trust_tier": "trusted",
+            },
+            step_seen=4,
+        )
+    graph.policy.report_tracker.update(graph.policy.registry)
+
+    action, state = graph.next_action(
+        {
+            "scenario_id": "s-1",
+            "step_index": 13,
+            "new_alerts": [],
+            "new_emails": [],
+            "containment": {"isolated_hosts": ["h-001"], "blocked_domains": [], "reset_users": []},
+            "last_action_result": {"ok": True, "message": "query_logs", "data": {"rows": []}},
+        }
+    )
+
+    assert action["action_type"] == "query_logs"
+    assert action["params"] != {"host_id": "h-002"}
+    assert state.budget_state["phase"] == "report_fill"
+
+def test_verifier_prompt_includes_approved_containment_candidates():
+    verifier_llm = StaticJSONLLMClient({"action_type": "investigate"})
+    graph = DefenderGraph(
+        policy=DefenderPolicy(max_steps=15, containment_min_step=0),
+        investigator=Investigator(StaticJSONLLMClient({"intent_type": "query_logs"})),
+        verifier=LLMVerifier(verifier_llm),
+    )
+    graph.policy.registry.add_row(
+        {
+            "alert_id": "alert-host",
+            "host_id": "h-001",
+            "message": "verified malicious credential alert",
+            "trust_tier": "verified",
+        },
+        step_seen=4,
+    )
+    graph.policy.report_tracker.update(graph.policy.registry)
+
+    graph.next_action(
+        {
+            "scenario_id": "s-1",
+            "step_index": 11,
+            "new_alerts": [],
+            "new_emails": [],
+            "containment": {"isolated_hosts": [], "blocked_domains": [], "reset_users": []},
+            "last_action_result": {"ok": True, "message": "query_logs", "data": {"rows": []}},
+        }
+    )
+
+    prompt = verifier_llm.traces[0].messages[1]["content"]
+    assert "containment_candidates" in prompt
+    assert "approved" in prompt
+    assert "isolate_host" in prompt
+    assert "h-001" in prompt
+    assert "must_use_pre_report_slot" in prompt
+
+
+def test_verifier_investigate_is_overridden_in_last_pre_report_slot():
+    graph = DefenderGraph(
+        policy=DefenderPolicy(max_steps=15, containment_min_step=0),
+        investigator=Investigator(StaticJSONLLMClient({"intent_type": "query_logs"})),
+        verifier=LLMVerifier(StaticJSONLLMClient({"action_type": "investigate"})),
+    )
+    graph.policy.registry.add_row(
+        {
+            "alert_id": "alert-host",
+            "host_id": "h-001",
+            "message": "verified malicious credential alert",
+            "trust_tier": "verified",
+        },
+        step_seen=4,
+    )
+    graph.policy.report_tracker.update(graph.policy.registry)
+
+    action, state = graph.next_action(
+        {
+            "scenario_id": "s-1",
+            "step_index": 13,
+            "new_alerts": [],
+            "new_emails": [],
+            "containment": {"isolated_hosts": [], "blocked_domains": [], "reset_users": []},
+            "last_action_result": {"ok": True, "message": "query_logs", "data": {"rows": []}},
+        }
+    )
+
+    verifier_trace = next(trace for trace in state.traces if trace.node == "verifier")
+    assert verifier_trace.output_summary["source"] == "policy_report_fill_override"
+    assert verifier_trace.output_summary["action_type"] == "isolate_host"
+    assert verifier_trace.output_summary["entity_value"] == "h-001"
+    assert action == {"action_type": "isolate_host", "params": {"host_id": "h-001"}}
+

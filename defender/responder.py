@@ -16,6 +16,18 @@ CONTAINMENT_BUILDERS = {
     "reset_user": reset_user,
 }
 
+REPORT_FIELD_BY_ACTION = {
+    "isolate_host": "patient_zero_host",
+    "block_domain": "attacker_domain",
+    "reset_user": "compromised_user",
+}
+
+CONTAINMENT_LIST_BY_ACTION = {
+    "isolate_host": "isolated_hosts",
+    "block_domain": "blocked_domains",
+    "reset_user": "reset_users",
+}
+
 
 @dataclass(frozen=True)
 class VerifiedActionCandidate:
@@ -45,13 +57,23 @@ class Responder:
             return submit_report(self.policy.build_report(parsed.containment)), verified
 
         report_fill_phase = parsed.step_index >= self.policy.early_report_step()
-        if verified.gate_decision and verified.gate_decision.approved and verified.entity_value and not report_fill_phase:
-            builder = CONTAINMENT_BUILDERS[verified.action_type]
-            self.policy.mark_containment_attempted(verified.action_type, verified.entity_value)
-            return builder(verified.entity_value), verified
+        if verified.gate_decision and verified.gate_decision.approved and verified.entity_value:
+            if not report_fill_phase or self._allow_report_fill_containment(parsed, verified):
+                builder = CONTAINMENT_BUILDERS[verified.action_type]
+                self.policy.mark_containment_attempted(verified.action_type, verified.entity_value)
+                return builder(verified.entity_value), verified
+
+        if self.policy.should_prioritize_containment(parsed.step_index, parsed.containment):
+            containment = self._next_report_fill_containment(parsed)
+            if containment is not None:
+                return containment, verified
 
         if self.policy.containment_window_open(parsed.step_index):
-            containment = self.policy.next_gated_containment(parsed.step_index, parsed.containment)
+            containment = (
+                self._next_report_fill_containment(parsed)
+                if report_fill_phase
+                else self.policy.next_gated_containment(parsed.step_index, parsed.containment)
+            )
             if containment is not None:
                 return containment, verified
 
@@ -64,6 +86,38 @@ class Responder:
             return unseen, verified
 
         return self.policy.investigate(parsed), verified
+
+
+    def _allow_report_fill_containment(self, parsed: ParsedObservation, verified: VerifiedActionCandidate) -> bool:
+        if verified.action_type not in CONTAINMENT_BUILDERS or not verified.entity_value:
+            return False
+        report_field = REPORT_FIELD_BY_ACTION[verified.action_type]
+        expected = self.policy.report_tracker.values.get(report_field)
+        if expected != verified.entity_value:
+            return False
+        contained = set(parsed.containment.get(CONTAINMENT_LIST_BY_ACTION[verified.action_type]) or [])
+        return not contained
+
+    def _next_report_fill_containment(self, parsed: ParsedObservation):
+        for action_type, builder in CONTAINMENT_BUILDERS.items():
+            contained = set(parsed.containment.get(CONTAINMENT_LIST_BY_ACTION[action_type]) or [])
+            if contained:
+                continue
+            entity_value = self.policy.report_tracker.values.get(REPORT_FIELD_BY_ACTION[action_type])
+            if not entity_value or entity_value == "unknown":
+                continue
+            decision = gate_containment(
+                action_type,
+                entity_value,
+                self.policy.registry,
+                step_index=parsed.step_index,
+                containment_min_step=int(self.policy.containment_min_step or 0),
+                calibration=self.policy.calibration,
+            )
+            if decision.approved:
+                self.policy.mark_containment_attempted(action_type, entity_value)
+                return builder(entity_value)
+        return None
 
     def _verify_candidate(
         self,
@@ -106,8 +160,12 @@ class Responder:
             if email_id:
                 self.policy.fetched_emails.add(email_id)
                 return fetch_email(email_id)
-        if intent.intent_type == "query_logs" and intent.entity_value:
-            return self.policy.sql_planner.query_for_entity(intent.entity_value, intent.entity_type or "")
+        if intent.intent_type == "query_logs":
+            report_gaps = {key for key, value in self.policy.report_tracker.values.items() if value == "unknown"}
+            if getattr(intent, "sql", ""):
+                return self.policy.sql_planner.action_for_sql(intent.sql, report_gaps=report_gaps)
+            if intent.entity_value:
+                return self.policy.sql_planner.query_for_entity(intent.entity_value, intent.entity_type or "")
         return None
 
 
@@ -125,8 +183,6 @@ def verified_candidate_payload(candidate: VerifiedActionCandidate) -> dict[str, 
             "approved": decision.approved,
             "reason": decision.reason,
             "support_count": len(decision.support),
-            "score": decision.score,
-            "threshold": decision.threshold,
             "evidence_ids": list(decision.evidence_ids),
         }
     return payload

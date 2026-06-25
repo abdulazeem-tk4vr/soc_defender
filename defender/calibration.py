@@ -70,15 +70,9 @@ class CalibrationConfig:
     status: str = "initial"
     tuned_on: str = "train"
     notes: str = "Initial deterministic MVP thresholds. Tune only on OpenSec train split."
-    containment_min_step: int = 5
+    containment_min_step: int | None = None
+    containment_min_step_divisor: int = 3
     report_deadline_step: int | None = None
-    containment_thresholds: dict[str, float] = field(
-        default_factory=lambda: {
-            "block_domain": 8.0,
-            "isolate_host": 8.0,
-            "reset_user": 8.0,
-        }
-    )
     report_field_thresholds: dict[str, float] = field(
         default_factory=lambda: {
             "patient_zero_host": 6.0,
@@ -94,9 +88,6 @@ class CalibrationConfig:
         }
     )
     score_weights: dict[str, Any] = field(default_factory=lambda: dict(DEFAULT_SCORE_WEIGHTS))
-
-    def containment_threshold(self, action_type: str) -> float:
-        return float(self.containment_thresholds.get(action_type, 8.0))
 
     def report_field_threshold(self, field_name: str) -> float:
         return float(self.report_field_thresholds.get(field_name, 6.0))
@@ -139,9 +130,13 @@ def load_calibration(path: str | Path | None = None) -> CalibrationConfig:
         status=str(raw_calibration.get("status", defaults.status)),
         tuned_on=str(raw_calibration.get("tuned_on", defaults.tuned_on)),
         notes=str(raw_calibration.get("notes", defaults.notes)),
-        containment_min_step=int(raw_calibration.get("containment_min_step", defaults.containment_min_step)),
+        containment_min_step=(
+            int(raw_calibration["containment_min_step"])
+            if raw_calibration.get("containment_min_step") is not None
+            else defaults.containment_min_step
+        ),
+        containment_min_step_divisor=max(1, int(raw_calibration.get("containment_min_step_divisor", defaults.containment_min_step_divisor))),
         report_deadline_step=raw_calibration.get("report_deadline_step", defaults.report_deadline_step),
-        containment_thresholds=dict(raw_calibration.get("thresholds", {}).get("containment", defaults.containment_thresholds)),
         report_field_thresholds=dict(
             raw_calibration.get("thresholds", {}).get("report_fields", defaults.report_field_thresholds)
         ),

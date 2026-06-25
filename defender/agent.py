@@ -39,7 +39,7 @@ class SocDefenderAgent:
                 policy=self.policy,
                 scanner=scanner,
                 rag=self.rag or RAGIntel(),
-                rag_query_planner=RAGQueryPlanner(self.llm_client),
+                rag_query_planner=RAGQueryPlanner(),
                 investigator=Investigator(self.llm_client),
                 verifier=LLMVerifier(self.llm_client),
             )
@@ -51,6 +51,8 @@ class SocDefenderAgent:
     def act(self, observation: dict[str, Any]) -> dict[str, Any]:
         if self.policy.ensure_scenario(parse_observation(observation)):
             self.last_graph_state = None
+            if self.graph is not None:
+                self.graph.reset_episode_cache()
         if self.graph is not None:
             if self.use_langgraph:
                 from .langgraph_adapter import initial_langgraph_state

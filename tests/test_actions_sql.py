@@ -13,6 +13,25 @@ def test_query_logs_rejects_non_evidence_tables_and_select_one():
         assert not ok, reason
 
 
+
+
+def test_query_logs_rejects_unknown_columns_and_time_functions():
+    for sql in (
+        "SELECT * FROM security_logs WHERE host_id = 'h-001'",
+        "SELECT host_name FROM alerts ORDER BY step DESC LIMIT 20",
+        "SELECT * FROM process_events WHERE event_time >= NOW() - INTERVAL 7 DAY",
+        "SELECT * FROM process_events WHERE indicators LIKE '%lateral%'",
+    ):
+        ok, reason = validate_action(query_logs(sql))
+        assert not ok, sql
+
+
+def test_query_logs_accepts_known_columns_on_known_tables():
+    ok, reason = validate_action(
+        query_logs("SELECT host_id, user_id FROM process_events WHERE host_id = 'h-001' ORDER BY step DESC LIMIT 20")
+    )
+    assert ok, reason
+
 def test_query_logs_accepts_known_evidence_tables():
     ok, reason = validate_action(query_logs("SELECT * FROM alerts ORDER BY step DESC LIMIT 20"))
     assert ok, reason
@@ -39,12 +58,12 @@ def test_sql_planner_entity_queries_use_step_ordering():
     assert is_allowlisted_template(action.params["sql"])
 
 
-def test_sql_planner_rejects_arbitrary_safe_selects_to_templates():
+def test_sql_planner_accepts_arbitrary_safe_selects_over_allowed_tables():
     planner = SQLPlanner()
-    action = planner.action_for_sql("SELECT host_id FROM alerts ORDER BY step DESC LIMIT 20")
+    action = planner.action_for_sql("SELECT host_id FROM process_events ORDER BY step DESC LIMIT 20")
 
-    assert action.params["sql"] == "SELECT * FROM alerts ORDER BY step DESC LIMIT 20"
-    assert is_allowlisted_template(action.params["sql"])
+    assert action.params["sql"] == "SELECT host_id FROM process_events ORDER BY step DESC LIMIT 20"
+    assert not is_allowlisted_template(action.params["sql"])
 
 
 def test_report_validation_requires_containment_lists():
@@ -80,6 +99,28 @@ def test_sql_planner_targeted_gap_queries_are_allowlisted():
     target_query = planner.action_for_sql(planner.next_gap_query("data_target")).params["sql"]
 
     assert domain_query == "SELECT * FROM netflow WHERE dst_domain IS NOT NULL ORDER BY step DESC LIMIT 20"
-    assert target_query == "SELECT * FROM process_events WHERE target_id IS NOT NULL ORDER BY step DESC LIMIT 20"
+    assert target_query == "SELECT * FROM process_events WHERE command_line LIKE '%exfil%' ORDER BY step DESC LIMIT 20"
     assert is_allowlisted_template(domain_query)
     assert is_allowlisted_template(target_query)
+
+def test_sql_planner_repairs_invalid_llm_sql_to_gap_query():
+    planner = SQLPlanner()
+
+    action = planner.action_for_sql(
+        "SELECT * FROM alerts WHERE entity_type = 'host' ORDER BY step DESC LIMIT 20;",
+        report_gaps={"attacker_domain", "data_target"},
+    )
+
+    assert action.params["sql"] == "SELECT * FROM netflow WHERE dst_domain IS NOT NULL ORDER BY step DESC LIMIT 20"
+
+
+def test_sql_planner_allows_valid_llm_sql_and_normalizes_semicolon():
+    planner = SQLPlanner()
+
+    action = planner.action_for_sql(
+        "SELECT host_id FROM process_events ORDER BY step DESC LIMIT 20;",
+        report_gaps={"attacker_domain"},
+    )
+
+    assert action.params["sql"] == "SELECT host_id FROM process_events ORDER BY step DESC LIMIT 20"
+

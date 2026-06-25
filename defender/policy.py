@@ -12,6 +12,13 @@ from .sql_planner import SQLPlanner
 from .verifier import gate_containment
 
 
+CONTAINMENT_SPECS = (
+    ("isolate_host", "host", isolate_host, "patient_zero_host", "isolated_hosts"),
+    ("block_domain", "domain", block_domain, "attacker_domain", "blocked_domains"),
+    ("reset_user", "user", reset_user, "compromised_user", "reset_users"),
+)
+
+
 @dataclass
 class DefenderPolicy:
     mode: str = "evidence_gate_only"
@@ -29,7 +36,11 @@ class DefenderPolicy:
 
     def __post_init__(self) -> None:
         if self.containment_min_step is None:
-            self.containment_min_step = self.calibration.containment_min_step
+            self.containment_min_step = (
+                self.calibration.containment_min_step
+                if self.calibration.containment_min_step is not None
+                else self.default_containment_min_step()
+            )
         if self.report_deadline_step is None:
             self.report_deadline_step = self.calibration.report_deadline_step
         self.registry = EvidenceRegistry(calibration=self.calibration)
@@ -103,35 +114,8 @@ class DefenderPolicy:
         return None
 
     def next_gated_containment(self, step_index: int, containment: dict[str, list[str]]):
-        candidates = [
-            (
-                "block_domain",
-                "domain",
-                block_domain,
-                self.report_tracker.values.get("attacker_domain"),
-                set(containment.get("blocked_domains") or []),
-            ),
-            (
-                "isolate_host",
-                "host",
-                isolate_host,
-                self.report_tracker.values.get("patient_zero_host"),
-                set(containment.get("isolated_hosts") or []),
-            ),
-            (
-                "reset_user",
-                "user",
-                reset_user,
-                self.report_tracker.values.get("compromised_user"),
-                set(containment.get("reset_users") or []),
-            ),
-        ]
-        for action_type, entity_type, builder, entity_value, already_done in candidates:
-            if not entity_value or entity_value == "unknown":
-                continue
+        for action_type, entity_type, builder, entity_value, _ in self.pending_containment_candidates(containment):
             key = (action_type, entity_value)
-            if entity_value in already_done or key in self.attempted_containment:
-                continue
             decision = gate_containment(
                 action_type,
                 entity_value,
@@ -148,6 +132,76 @@ class DefenderPolicy:
             if evidence_action is not None:
                 return evidence_action
         return None
+
+    def pending_containment_candidates(self, containment: dict[str, list[str]]):
+        candidates = []
+        for action_type, entity_type, builder, report_field, containment_field in CONTAINMENT_SPECS:
+            entity_value = self.report_tracker.values.get(report_field)
+            if not entity_value or entity_value == "unknown":
+                continue
+            already_done = set(containment.get(containment_field) or [])
+            key = (action_type, entity_value)
+            if entity_value in already_done or key in self.attempted_containment:
+                continue
+            candidates.append((action_type, entity_type, builder, entity_value, containment_field))
+        return candidates
+
+    def containment_candidate_context(self, step_index: int, containment: dict[str, list[str]]) -> dict[str, Any]:
+        approved = []
+        rejected = []
+        for action_type, entity_type, _, entity_value, containment_field in self.pending_containment_candidates(containment):
+            decision = gate_containment(
+                action_type,
+                entity_value,
+                self.registry,
+                step_index=step_index,
+                containment_min_step=int(self.containment_min_step or 0),
+                calibration=self.calibration,
+            )
+            item = {
+                "action_type": action_type,
+                "entity_type": entity_type,
+                "entity_value": entity_value,
+                "containment_field": containment_field,
+                "approved": decision.approved,
+                "reason": decision.reason,
+                "evidence_ids": list(decision.evidence_ids),
+            }
+            if decision.approved:
+                approved.append(item)
+            else:
+                rejected.append(item)
+        return {
+            "approved": approved,
+            "rejected": rejected,
+            "must_use_pre_report_slot": self.should_prioritize_containment(step_index, containment),
+            "deadline_step": self.deadline_step(),
+            "steps_until_report_deadline": max(0, self.deadline_step() - step_index),
+        }
+
+    def approved_pending_containment_count(self, step_index: int, containment: dict[str, list[str]]) -> int:
+        approved = 0
+        for action_type, _, _, entity_value, _ in self.pending_containment_candidates(containment):
+            decision = gate_containment(
+                action_type,
+                entity_value,
+                self.registry,
+                step_index=step_index,
+                containment_min_step=int(self.containment_min_step or 0),
+                calibration=self.calibration,
+            )
+            if decision.approved:
+                approved += 1
+        return approved
+
+    def should_prioritize_containment(self, step_index: int, containment: dict[str, list[str]]) -> bool:
+        if step_index >= self.deadline_step() or step_index < int(self.containment_min_step or 0):
+            return False
+        approved = self.approved_pending_containment_count(step_index, containment)
+        if approved <= 0:
+            return False
+        remaining_pre_report_steps = max(0, self.deadline_step() - step_index)
+        return approved >= remaining_pre_report_steps
 
     def investigate(self, parsed):
         report_gaps = {key for key, value in self.report_tracker.values.items() if value == "unknown"}
@@ -180,6 +234,9 @@ class DefenderPolicy:
         if result.get("message") == "query_logs" and data.get("ok") is False:
             if self.sql_planner.last_emitted_sql:
                 self.sql_planner.record_failure(self.sql_planner.last_emitted_sql)
+
+    def default_containment_min_step(self) -> int:
+        return max(1, self.max_steps // max(1, self.calibration.containment_min_step_divisor))
 
     def deadline_step(self) -> int:
         if self.report_deadline_step is not None:

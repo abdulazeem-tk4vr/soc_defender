@@ -57,3 +57,36 @@ def test_report_readiness_keeps_stronger_locked_value_over_weaker_later_conflict
     assert tracker.field_state["attacker_domain"].locked
     assert tracker.field_state["attacker_domain"].provenance == ("flow-strong",)
     assert tracker.field_state["attacker_domain"].conflict_history
+
+
+
+def test_verifier_choice_can_override_existing_report_value_when_evidence_backed():
+    from defender.evidence_registry import EvidenceRegistry
+
+    tracker = ReportReadinessTracker()
+    registry = EvidenceRegistry()
+    registry.add_row(
+        {
+            "alert_id": "alert-initial",
+            "host_id": "h-001",
+            "message": "credential alert stage",
+            "trust_tier": "trusted",
+        },
+        step_seen=1,
+    )
+    tracker.update(registry)
+
+    registry.add_row(
+        {
+            "alert_id": "alert-late",
+            "host_id": "h-002",
+            "message": "exfil alert stage",
+            "trust_tier": "trusted",
+        },
+        step_seen=10,
+    )
+    tracker.update(registry)
+    result = tracker.apply_verified_choices(registry, {"patient_zero_host": "h-002"})
+
+    assert result["accepted"] == {"patient_zero_host": "h-002"}
+    assert tracker.values["patient_zero_host"] == "h-002"

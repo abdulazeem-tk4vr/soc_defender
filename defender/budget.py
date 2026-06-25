@@ -36,6 +36,6 @@ def budget_state(
         report_deadline_step=report_deadline_step,
         steps_remaining_before_report=steps_remaining,
         phase=phase,
-        containment_allowed=step_index >= containment_min_step and phase != "report_fill",
+        containment_allowed=step_index >= containment_min_step and steps_remaining > 0,
         report_fill_priority=phase == "report_fill",
     )

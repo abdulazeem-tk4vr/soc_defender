@@ -32,11 +32,28 @@ REPORT_FIELDS = {
     "containment_actions",
 }
 
-ALLOWED_TABLES = {"email_logs", "auth_logs", "netflow", "process_events", "alerts"}
+TABLE_COLUMNS = {
+    "email_logs": {"email_id", "scenario_id", "step", "sender", "recipient", "subject", "body", "is_phish", "injection_id", "trust_tier", "source", "created_at"},
+    "auth_logs": {"auth_id", "scenario_id", "step", "user_id", "host_id", "source_ip", "auth_type", "success", "trust_tier", "source", "created_at"},
+    "netflow": {"flow_id", "scenario_id", "step", "src_host", "dst_host", "dst_domain", "dst_port", "protocol", "bytes_sent", "bytes_received", "trust_tier", "source", "created_at"},
+    "process_events": {"event_id", "scenario_id", "step", "host_id", "user_id", "process_name", "command_line", "parent_process", "trust_tier", "source", "created_at"},
+    "alerts": {"alert_id", "scenario_id", "step", "alert_type", "severity", "message", "related_log_id", "injection_id", "trust_tier", "source", "created_at"},
+}
+ALLOWED_TABLES = set(TABLE_COLUMNS)
+SQL_KEYWORDS = {
+    "select", "from", "where", "and", "or", "not", "null", "is", "like", "in", "order", "by", "desc", "asc",
+    "limit", "as", "distinct", "count", "min", "max", "sum", "avg", "lower", "upper", "cast", "integer",
+}
+DISALLOWED_SQL_TOKENS = {"now", "current_timestamp", "interval", "date", "datetime", "julianday", "strftime"}
 
 
 def referenced_tables(sql: str) -> set[str]:
     return {m.group(1).lower() for m in re.finditer(r"\bfrom\s+([a-zA-Z_][a-zA-Z0-9_]*)", sql, re.I)}
+
+
+def referenced_identifiers(sql: str) -> set[str]:
+    scrubbed = re.sub(r"'[^']*(?:''[^']*)*'", " ", sql)
+    return {token.lower() for token in re.findall(r"\b[a-zA-Z_][a-zA-Z0-9_]*\b", scrubbed)}
 
 
 def is_safe_select(sql: str) -> bool:
@@ -48,7 +65,14 @@ def is_safe_select(sql: str) -> bool:
     if stripped.rstrip(";").strip().lower() == "select 1":
         return False
     tables = referenced_tables(stripped)
-    return bool(tables) and tables.issubset(ALLOWED_TABLES)
+    if not tables or not tables.issubset(ALLOWED_TABLES):
+        return False
+    identifiers = referenced_identifiers(stripped)
+    if identifiers.intersection(DISALLOWED_SQL_TOKENS):
+        return False
+    allowed_columns = set().union(*(TABLE_COLUMNS[table] for table in tables))
+    allowed = allowed_columns | tables | SQL_KEYWORDS
+    return identifiers.issubset(allowed)
 
 
 def make_action(action_type: str, **params: Any) -> AgentAction:
