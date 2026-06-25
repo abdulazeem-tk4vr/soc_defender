@@ -4,7 +4,7 @@ Agentic AI SOC defender with evidence-gated response, prompt-injection safeguard
 RAG/LLM workflows, and OpenSec evaluation tools.
 
 `soc_defender` is a compact agentic AI system for building and evaluating SOC
-incident-response agents. It provides OpenSec-compatible evaluation, configurable
+incident-response agents. It provides OpenSec-compatible agent modes, configurable
 defender modes, evidence tracking, prompt-injection safeguards, optional RAG and
 LLM-backed workflows, structured reporting, and focused tests for rapid iteration.
 
@@ -22,13 +22,26 @@ py -m pip install -e ".[dev]"
 py -m pytest -q
 ```
 
-Run a small deterministic smoke eval:
+Run benchmark smoke evals through OpenSec's canonical agent-mode runner:
+
+```powershell
+cd ..\opensec-env
+py scripts\eval.py --config configs\soc_defender_agents.yaml --models evidence_gate_only --split train --limit 5
+py scripts\eval.py --config configs\soc_defender_agents.yaml --models full_agentic --split eval --limit 5 --output outputs\agents\full_agentic_eval_smoke.jsonl
+```
+
+Use `opensec-env\scripts\eval.py` and outputs under `opensec-env\outputs` for
+benchmark claims and reported metrics. Agent-provider runs default to
+`opensec-env\outputs\agents`; LLM-provider runs default to
+`opensec-env\outputs\llms`.
+
+Run the older sibling harness only for local development checks:
 
 ```powershell
 py scripts\eval.py --defender evidence_gate_only --no-rag --split train --limit 5 --output outputs\smoke.jsonl --summary outputs\smoke_summary.json
 ```
 
-The eval script expects the OpenSec checkout at `..\opensec-env` by default. Use
+The local helper expects the OpenSec checkout at `..\opensec-env` by default. Use
 `--opensec-root path\to\opensec-env` if yours lives elsewhere.
 
 ## Tests
