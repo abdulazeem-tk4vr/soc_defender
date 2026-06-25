@@ -107,8 +107,11 @@ py scripts\build_qdrant_index.py --chunks data\rag\chunks.jsonl --device cpu
 
 ```powershell
 py scripts\summarize.py outputs\smoke.jsonl --output outputs\smoke_rollup.json
-py scripts\analyze_failures.py outputs\smoke.jsonl
+py scripts\analyze_failures.py --input outputs\smoke.jsonl
 ```
+
+For reproducible OpenSec train calibration, ablations, and frozen final evals,
+use `docs\opensec_train_eval_workflow.md`.
 
 For current implementation status and benchmark notes, see
 `docs\progress.md` and `docs\baseline_parity.md`.

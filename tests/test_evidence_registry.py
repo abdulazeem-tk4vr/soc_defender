@@ -89,3 +89,74 @@ def test_trusted_corroboration_recovers_entity_from_tainted_context():
 
     assert tracker.values["attacker_domain"] == "real.example"
     assert decision.approved
+    assert decision.score >= decision.threshold
+    assert decision.evidence_ids == ("flow-real",)
+
+
+def test_scored_candidate_exposes_score_and_evidence_ids():
+    registry = EvidenceRegistry()
+    registry.add_row(
+        {
+            "flow_id": "flow-1",
+            "dst_domain": "evil.example",
+            "message": "exfil alert",
+            "trust_tier": "verified",
+        },
+        step_seen=3,
+    )
+
+    candidate = registry.scored_candidate("evil.example", "domain")
+
+    assert candidate is not None
+    assert candidate.eligible
+    assert candidate.score > 0
+    assert candidate.evidence_ids == ("flow-1",)
+    assert candidate.support[0].source_table == "netflow"
+
+
+def test_alert_destination_and_process_target_fields_support_attribution():
+    registry = EvidenceRegistry()
+    registry.add_row(
+        {
+            "alert_id": "alert-domain",
+            "destination": "evil.example",
+            "message": "alert exfil destination observed",
+            "trust_tier": "verified",
+        },
+        step_seen=3,
+    )
+    registry.add_row(
+        {
+            "event_id": "proc-target",
+            "target": "payroll-db",
+            "command_line": "stage archive then exfil target=payroll-db",
+            "trust_tier": "verified",
+        },
+        step_seen=4,
+    )
+    tracker = ReportReadinessTracker()
+
+    tracker.update(registry)
+
+    assert tracker.values["attacker_domain"] == "evil.example"
+    assert tracker.values["data_target"] == "payroll-db"
+
+
+def test_email_only_domain_can_report_but_cannot_authorize_blocking():
+    registry = EvidenceRegistry()
+    registry.add_row(
+        {
+            "email_id": "email-domain",
+            "body": "credential phish link dst_domain=evil.example",
+            "trust_tier": "verified",
+        },
+        step_seen=3,
+    )
+    tracker = ReportReadinessTracker()
+    tracker.update(registry)
+
+    decision = gate_containment("block_domain", "evil.example", registry, step_index=8, containment_min_step=1)
+
+    assert tracker.values["attacker_domain"] == "evil.example"
+    assert not decision.approved
+    assert decision.reason == "domain lacks trusted network or alert malicious support"

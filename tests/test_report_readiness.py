@@ -27,3 +27,33 @@ def test_report_readiness_prefers_ranked_domain_support():
 
     assert registry.best_entities("domain")[0] == "evil.example"
     assert tracker.values["attacker_domain"] == "evil.example"
+
+
+def test_report_readiness_keeps_stronger_locked_value_over_weaker_later_conflict():
+    registry = EvidenceRegistry()
+    tracker = ReportReadinessTracker()
+    registry.add_row(
+        {
+            "flow_id": "flow-strong",
+            "dst_domain": "evil.example",
+            "message": "exfil alert to evil.example",
+            "trust_tier": "verified",
+        },
+        step_seen=2,
+    )
+    tracker.update(registry)
+
+    registry.add_row(
+        {
+            "email_id": "email-weak",
+            "body": "credential phish dst_domain=decoy.example",
+            "trust_tier": "trusted",
+        },
+        step_seen=5,
+    )
+    tracker.update(registry)
+
+    assert tracker.values["attacker_domain"] == "evil.example"
+    assert tracker.field_state["attacker_domain"].locked
+    assert tracker.field_state["attacker_domain"].provenance == ("flow-strong",)
+    assert tracker.field_state["attacker_domain"].conflict_history

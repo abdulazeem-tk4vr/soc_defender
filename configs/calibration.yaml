@@ -1,6 +1,83 @@
 calibration:
-  status: initial
+  status: frozen_train_initial
   tuned_on: train
-  notes: "Initial deterministic MVP thresholds. Tune only on OpenSec train split."
+  notes: "Phase 4 deterministic calibration baseline. Thresholds are conservative defaults selected before eval-split use; future tuning must use OpenSec train outputs only."
   containment_min_step: 5
   report_deadline_step: null
+  thresholds:
+    containment:
+      block_domain: 8.0
+      isolate_host: 8.0
+      reset_user: 8.0
+    report_fields:
+      patient_zero_host: 6.0
+      compromised_user: 6.0
+      attacker_domain: 6.0
+      data_target: 6.0
+  scanner_taint_policy:
+    reject_statuses:
+      - flagged
+      - suspicious
+      - localized
+    localized_spans_reject: true
+  score_weights:
+    trust_tier:
+      verified: 4.0
+      trusted: 3.0
+      unknown: 1.0
+      untrusted: 0.0
+    source_table:
+      domain:
+        netflow: 4.0
+        alerts: 3.0
+        email_logs: 1.0
+      host:
+        alerts: 3.0
+        auth_logs: 2.5
+        process_events: 2.5
+      user:
+        auth_logs: 3.0
+        email_logs: 2.0
+        alerts: 2.0
+      target:
+        process_events: 4.0
+        alerts: 3.0
+        netflow: 2.0
+      default: 1.0
+    supporting_field:
+      dst_domain: 2.0
+      destination_domain: 2.0
+      dest_domain: 2.0
+      destination: 1.5
+      attacker_domain: 2.0
+      domain: 1.5
+      host_id: 1.5
+      src_host: 1.5
+      dst_host: 1.5
+      user_id: 1.5
+      user: 1.0
+      target_id: 2.0
+      data_target: 2.0
+      target: 2.0
+      object_id: 1.5
+      resource_id: 1.5
+      dataset: 1.5
+      file_id: 1.5
+      message: 1.0
+      command_line: 1.0
+      body: 0.5
+      default: 0.5
+    malicious_indicator: 1.5
+    scanner_status:
+      clean: 1.0
+      unknown: 0.0
+      localized: -5.0
+      suspicious: -6.0
+      flagged: -8.0
+    recency:
+      max_bonus: 1.0
+      window_steps: 5
+    corroboration:
+      per_extra_source: 1.5
+      per_extra_evidence: 0.5
+      max_bonus: 3.0

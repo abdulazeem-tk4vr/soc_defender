@@ -1,6 +1,7 @@
 from defender.evidence_registry import EntitySupport, EvidenceRegistry
 from defender.prompt_guard import LocalizedSpan
 from defender.verifier import gate_containment
+from defender.calibration import CalibrationConfig
 
 
 def test_gate_rejects_unobserved_containment_entity():
@@ -33,3 +34,48 @@ def test_gate_rejects_support_only_from_localized_injection_span():
 
     assert decision.approved is False
     assert decision.reason == "no trusted untainted content-exposed support"
+
+
+def test_gate_rejects_when_score_is_below_action_threshold():
+    calibration = CalibrationConfig(containment_thresholds={"block_domain": 50.0})
+    registry = EvidenceRegistry(calibration=calibration)
+    registry.add_row(
+        {
+            "flow_id": "flow-1",
+            "dst_domain": "evil.example",
+            "message": "exfil alert",
+            "trust_tier": "verified",
+        },
+        step_seen=6,
+    )
+
+    decision = gate_containment(
+        "block_domain",
+        "evil.example",
+        registry,
+        step_index=8,
+        containment_min_step=5,
+        calibration=calibration,
+    )
+
+    assert decision.approved is False
+    assert decision.reason == "support score below containment threshold"
+    assert decision.score < decision.threshold
+
+
+def test_gate_rejects_action_entity_mismatch():
+    registry = EvidenceRegistry()
+    registry.add_row(
+        {
+            "flow_id": "flow-1",
+            "dst_domain": "evil.example",
+            "message": "exfil alert",
+            "trust_tier": "verified",
+        },
+        step_seen=6,
+    )
+
+    decision = gate_containment("isolate_host", "evil.example", registry, step_index=8, containment_min_step=5)
+
+    assert decision.approved is False
+    assert decision.reason == "action/entity mismatch"

@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .actions import block_domain, fetch_alert, fetch_email, isolate_host, reset_user, submit_report
+from .calibration import CalibrationConfig, load_calibration
 from .evidence_registry import EvidenceRegistry
 from .observation import ParsedObservation, parse_observation
 from .report_readiness import ReportReadinessTracker
@@ -15,15 +16,24 @@ from .verifier import gate_containment
 class DefenderPolicy:
     mode: str = "evidence_gate_only"
     max_steps: int = 15
-    containment_min_step: int = 5
+    calibration: CalibrationConfig = field(default_factory=load_calibration)
+    containment_min_step: int | None = None
     report_deadline_step: int | None = None
-    registry: EvidenceRegistry = field(default_factory=EvidenceRegistry)
-    report_tracker: ReportReadinessTracker = field(default_factory=ReportReadinessTracker)
+    registry: EvidenceRegistry = field(init=False)
+    report_tracker: ReportReadinessTracker = field(init=False)
     sql_planner: SQLPlanner = field(default_factory=SQLPlanner)
     fetched_emails: set[str] = field(default_factory=set)
     fetched_alerts: set[str] = field(default_factory=set)
     attempted_containment: set[tuple[str, str]] = field(default_factory=set)
     current_scenario_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.containment_min_step is None:
+            self.containment_min_step = self.calibration.containment_min_step
+        if self.report_deadline_step is None:
+            self.report_deadline_step = self.calibration.report_deadline_step
+        self.registry = EvidenceRegistry(calibration=self.calibration)
+        self.report_tracker = ReportReadinessTracker(calibration=self.calibration)
 
     def next_action(self, observation: dict[str, Any]):
         parsed = parse_observation(observation)
@@ -73,8 +83,8 @@ class DefenderPolicy:
         return True
 
     def reset_episode_state(self, scenario_id: str | None = None) -> None:
-        self.registry = EvidenceRegistry()
-        self.report_tracker = ReportReadinessTracker()
+        self.registry = EvidenceRegistry(calibration=self.calibration)
+        self.report_tracker = ReportReadinessTracker(calibration=self.calibration)
         self.sql_planner = SQLPlanner()
         self.fetched_emails.clear()
         self.fetched_alerts.clear()
@@ -127,19 +137,24 @@ class DefenderPolicy:
                 entity_value,
                 self.registry,
                 step_index=step_index,
-                containment_min_step=self.containment_min_step,
+                containment_min_step=int(self.containment_min_step or 0),
+                calibration=self.calibration,
             )
             if decision.approved:
                 self.attempted_containment.add(key)
                 return builder(entity_value)
+            self.attempted_containment.add(key)
+            evidence_action = self.evidence_action_after_rejected_containment(action_type)
+            if evidence_action is not None:
+                return evidence_action
         return None
 
     def investigate(self, parsed):
         report_gaps = {key for key, value in self.report_tracker.values.items() if value == "unknown"}
         if "attacker_domain" in report_gaps and not self.registry.best_entities("domain"):
-            return self.sql_planner.action_for_sql(self.sql_planner.next_broad_query(report_gaps))
+            return self.sql_planner.action_for_sql(self.sql_planner.next_gap_query("attacker_domain"))
         if "data_target" in report_gaps and not self.registry.best_entities("target"):
-            return self.sql_planner.action_for_sql(self.sql_planner.next_broad_query(report_gaps))
+            return self.sql_planner.action_for_sql(self.sql_planner.next_gap_query("data_target"))
 
         for entity_type in ("domain", "target", "host", "user"):
             for entity_value in self.registry.best_entities(entity_type):
@@ -149,6 +164,15 @@ class DefenderPolicy:
                 if action.params["sql"] not in self.sql_planner.failed_queries:
                     return action
         return self.sql_planner.action_for_sql(self.sql_planner.next_broad_query(report_gaps))
+
+    def evidence_action_after_rejected_containment(self, action_type: str):
+        if action_type == "block_domain":
+            return self.sql_planner.action_for_sql(self.sql_planner.next_gap_query("attacker_domain"))
+        if action_type == "isolate_host":
+            return self.sql_planner.action_for_sql(self.sql_planner.next_broad_query({"patient_zero_host"}))
+        if action_type == "reset_user":
+            return self.sql_planner.action_for_sql(self.sql_planner.next_broad_query({"compromised_user"}))
+        return None
 
     def record_failed_query(self, parsed) -> None:
         result = parsed.last_action_result or {}
@@ -167,8 +191,8 @@ class DefenderPolicy:
 
     def containment_window_open(self, step_index: int) -> bool:
         if self.report_tracker.is_complete():
-            return step_index >= self.containment_min_step
-        late_containment_step = max(self.containment_min_step, self.deadline_step() - 3)
+            return step_index >= int(self.containment_min_step or 0)
+        late_containment_step = max(int(self.containment_min_step or 0), self.deadline_step() - 3)
         return step_index >= late_containment_step
 
     def should_submit_deadline_report(self, parsed) -> bool:

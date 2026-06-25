@@ -18,6 +18,19 @@ BROAD_QUERY_TEMPLATES = (
     "SELECT * FROM process_events ORDER BY step DESC LIMIT 20",
 )
 
+GAP_QUERY_TEMPLATES = {
+    "attacker_domain": (
+        "SELECT * FROM netflow WHERE dst_domain IS NOT NULL ORDER BY step DESC LIMIT 20",
+        "SELECT * FROM alerts WHERE message LIKE '%dst_domain=%' ORDER BY step DESC LIMIT 20",
+        "SELECT * FROM alerts WHERE destination_domain IS NOT NULL ORDER BY step DESC LIMIT 20",
+    ),
+    "data_target": (
+        "SELECT * FROM process_events WHERE target_id IS NOT NULL ORDER BY step DESC LIMIT 20",
+        "SELECT * FROM alerts WHERE message LIKE '%target=%' ORDER BY step DESC LIMIT 20",
+        "SELECT * FROM process_events WHERE command_line LIKE '%exfil%' ORDER BY step DESC LIMIT 20",
+    ),
+}
+
 ENTITY_QUERY_PATTERNS = (
     re.compile(r"^SELECT \* FROM auth_logs WHERE host_id = '[^']*(?:''[^']*)*' ORDER BY step DESC LIMIT 20$"),
     re.compile(r"^SELECT \* FROM auth_logs WHERE user_id = '[^']*(?:''[^']*)*' ORDER BY step DESC LIMIT 20$"),
@@ -25,10 +38,23 @@ ENTITY_QUERY_PATTERNS = (
     re.compile(r"^SELECT \* FROM process_events WHERE target_id = '[^']*(?:''[^']*)*' ORDER BY step DESC LIMIT 20$"),
 )
 
+GAP_QUERY_PATTERNS = (
+    re.compile(r"^SELECT \* FROM netflow WHERE dst_domain IS NOT NULL ORDER BY step DESC LIMIT 20$"),
+    re.compile(r"^SELECT \* FROM alerts WHERE message LIKE '%dst_domain=%' ORDER BY step DESC LIMIT 20$"),
+    re.compile(r"^SELECT \* FROM alerts WHERE destination_domain IS NOT NULL ORDER BY step DESC LIMIT 20$"),
+    re.compile(r"^SELECT \* FROM process_events WHERE target_id IS NOT NULL ORDER BY step DESC LIMIT 20$"),
+    re.compile(r"^SELECT \* FROM alerts WHERE message LIKE '%target=%' ORDER BY step DESC LIMIT 20$"),
+    re.compile(r"^SELECT \* FROM process_events WHERE command_line LIKE '%exfil%' ORDER BY step DESC LIMIT 20$"),
+)
+
 
 def is_allowlisted_template(sql: str) -> bool:
     sql = sql.strip()
-    return sql in BROAD_QUERY_TEMPLATES or any(pattern.match(sql) for pattern in ENTITY_QUERY_PATTERNS)
+    return (
+        sql in BROAD_QUERY_TEMPLATES
+        or any(pattern.match(sql) for pattern in ENTITY_QUERY_PATTERNS)
+        or any(pattern.match(sql) for pattern in GAP_QUERY_PATTERNS)
+    )
 
 
 @dataclass
@@ -67,6 +93,16 @@ class SQLPlanner:
         if available:
             return min(available, key=lambda sql: self.emitted_counts.get(sql, 0))
         return "SELECT * FROM alerts ORDER BY step DESC LIMIT 20"
+
+    def next_gap_query(self, report_field: str) -> str:
+        candidates = list(GAP_QUERY_TEMPLATES.get(report_field, ()))
+        for sql in candidates:
+            if sql not in self.failed_queries and not self.already_emitted(sql):
+                return sql
+        available = [sql for sql in candidates if sql not in self.failed_queries]
+        if available:
+            return min(available, key=lambda sql: self.emitted_counts.get(sql, 0))
+        return self.next_broad_query({report_field})
 
     @staticmethod
     def _broad_candidates(report_gaps: set[str]) -> list[str]:

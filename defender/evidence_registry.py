@@ -4,13 +4,21 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from .calibration import CalibrationConfig, load_calibration
 from .scanner import InjectionScanner
 
 HOST_RE = re.compile(r"\bh-[A-Za-z0-9_.-]+\b")
 USER_RE = re.compile(r"\bu-[A-Za-z0-9_.-]+\b")
 TARGET_RE = re.compile(r"\bt-[A-Za-z0-9_.-]+\b")
 DOMAIN_RE = re.compile(r"\b(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}\b")
-DOMAIN_KV_RE = re.compile(r"\b(?:dst_domain|destination_domain|domain)=([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b", re.I)
+DOMAIN_KV_RE = re.compile(
+    r"\b(?:dst_domain|destination_domain|dest_domain|domain|attacker_domain|destination)=([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b",
+    re.I,
+)
+TARGET_KV_RE = re.compile(
+    r"\b(?:target|target_id|data_target|dataset|object|object_id|resource|resource_id)=([A-Za-z0-9_.:-]+)\b",
+    re.I,
+)
 
 MALICIOUS_WORDS = {
     "phish",
@@ -59,6 +67,20 @@ class EntitySupport:
         return self.trusted and self.content_exposed and not self.tainted
 
 
+@dataclass(frozen=True)
+class ScoredEntityCandidate:
+    entity_value: str
+    entity_type: str
+    score: float
+    evidence_ids: tuple[str, ...]
+    support: tuple[EntitySupport, ...]
+    blocked_reasons: tuple[str, ...] = ()
+
+    @property
+    def eligible(self) -> bool:
+        return not self.blocked_reasons
+
+
 def _text_from_row(row: dict[str, Any]) -> str:
     return " ".join(str(v) for v in row.values() if v is not None)
 
@@ -100,14 +122,15 @@ def _extract_entities(row: dict[str, Any]) -> list[tuple[str, str, tuple[str, ..
         if field in {"user_id", "user", "recipient", "compromised_user"}:
             if text.startswith("u-"):
                 candidates.append((text, "user"))
-        if field in {"dst_domain", "destination_domain", "domain", "attacker_domain"}:
+        if field in {"dst_domain", "destination_domain", "dest_domain", "domain", "attacker_domain", "destination"}:
             candidates.append((text, "domain"))
-        if field in {"target_id", "data_target"}:
+        if field in {"target_id", "data_target", "target", "object_id", "resource_id", "dataset", "file_id"}:
             candidates.append((text, "target"))
         candidates.extend((match.group(0), "host") for match in HOST_RE.finditer(text))
         candidates.extend((match.group(0), "user") for match in USER_RE.finditer(text))
         candidates.extend((match.group(0), "target") for match in TARGET_RE.finditer(text))
         candidates.extend((match.group(1), "domain") for match in DOMAIN_KV_RE.finditer(text))
+        candidates.extend((match.group(1), "target") for match in TARGET_KV_RE.finditer(text))
         for value, entity_type in candidates:
             value = value.strip().strip('",')
             if not value or value == ".":
@@ -122,6 +145,7 @@ class EvidenceRegistry:
     content_ids: set[str] = field(default_factory=set)
     seen_ids: set[str] = field(default_factory=set)
     scanner: InjectionScanner = field(default_factory=InjectionScanner)
+    calibration: CalibrationConfig = field(default_factory=load_calibration)
 
     def update_from_observation(self, observation: Any) -> None:
         self.content_ids.update(getattr(observation, "evidence_content_ids", set()))
@@ -180,33 +204,100 @@ class EvidenceRegistry:
 
     def best_entities(self, entity_type: str) -> list[str]:
         seen: list[str] = []
-        for support in self.ranked_supports(entity_type):
-            if support.entity_value not in seen:
-                seen.append(support.entity_value)
+        for candidate in self.scored_candidates(entity_type):
+            if candidate.eligible and candidate.entity_value not in seen:
+                seen.append(candidate.entity_value)
         return seen
 
     def ranked_supports(self, entity_type: str) -> list[EntitySupport]:
-        supports = [
-            support
-            for support in self.supports
-            if support.entity_type == entity_type and support.trusted_action_support
-        ]
-        return sorted(supports, key=self._support_rank, reverse=True)
+        scored_supports: list[tuple[float, EntitySupport]] = []
+        for support in self.supports:
+            if support.entity_type == entity_type and support.trusted_action_support:
+                scored_supports.append((self.score_support(support), support))
+        return [support for _, support in sorted(scored_supports, key=lambda item: item[0], reverse=True)]
 
-    @staticmethod
-    def _support_rank(support: EntitySupport) -> tuple[int, int, int, int]:
-        trust_score = {"verified": 3, "trusted": 2, None: 1}.get(support.trust_tier, 1)
-        source_score = {
-            ("domain", "netflow"): 5,
-            ("target", "process_events"): 5,
-            ("target", "alerts"): 4,
-            ("host", "alerts"): 4,
-            ("host", "auth_logs"): 3,
-            ("user", "auth_logs"): 4,
-            ("user", "email_logs"): 3,
-            ("domain", "alerts"): 3,
-            ("domain", "email_logs"): 2,
-        }.get((support.entity_type, support.source_table), 1)
-        indicator_score = min(5, len(support.malicious_indicators))
-        field_score = min(3, len(support.supporting_fields))
-        return (trust_score, source_score, indicator_score, field_score)
+    def scored_candidate(self, entity_value: str, entity_type: str) -> ScoredEntityCandidate | None:
+        support = tuple(self.support_for(entity_value, entity_type))
+        if not support:
+            return None
+        return self._candidate_from_support(entity_value, entity_type, support)
+
+    def scored_candidates(self, entity_type: str) -> list[ScoredEntityCandidate]:
+        grouped: dict[str, list[EntitySupport]] = {}
+        for support in self.supports:
+            if support.entity_type == entity_type:
+                grouped.setdefault(support.entity_value, []).append(support)
+        candidates = [
+            self._candidate_from_support(entity_value, entity_type, tuple(support))
+            for entity_value, support in grouped.items()
+        ]
+        return sorted(candidates, key=lambda candidate: candidate.score, reverse=True)
+
+    def _candidate_from_support(
+        self,
+        entity_value: str,
+        entity_type: str,
+        support: tuple[EntitySupport, ...],
+    ) -> ScoredEntityCandidate:
+        trusted = tuple(item for item in support if item.trusted)
+        content_exposed = tuple(item for item in trusted if item.content_exposed)
+        untainted = tuple(item for item in content_exposed if not self.is_tainted_for_action(item))
+        blocked: list[str] = []
+        if not support:
+            blocked.append("no exact entity support")
+        if not content_exposed:
+            blocked.append("no content-exposed support")
+        if not trusted:
+            blocked.append("untrusted-only support")
+        if content_exposed and not untainted:
+            blocked.append("scanner-flagged-only support")
+        eligible_support = untainted
+        base_score = sum(self.score_support(item) for item in eligible_support)
+        score = base_score + self._corroboration_bonus(eligible_support)
+        evidence_ids = tuple(sorted({item.evidence_id for item in eligible_support}))
+        return ScoredEntityCandidate(
+            entity_value=entity_value,
+            entity_type=entity_type,
+            score=round(score, 3),
+            evidence_ids=evidence_ids,
+            support=eligible_support,
+            blocked_reasons=tuple(blocked),
+        )
+
+    def is_tainted_for_action(self, support: EntitySupport) -> bool:
+        if support.scanner_status in self.calibration.taint_reject_statuses:
+            return True
+        return self.calibration.reject_localized_spans and bool(support.localized_spans)
+
+    def score_support(self, support: EntitySupport) -> float:
+        weights = self.calibration.score_weights
+        trust_key = support.trust_tier or "unknown"
+        trust_score = float(weights["trust_tier"].get(trust_key, weights["trust_tier"].get("unknown", 0.0)))
+        table_weights = weights["source_table"].get(support.entity_type, {})
+        source_score = float(table_weights.get(support.source_table, weights["source_table"].get("default", 0.0)))
+        field_weights = weights["supporting_field"]
+        field_score = sum(float(field_weights.get(field, field_weights.get("default", 0.0))) for field in support.supporting_fields)
+        field_score = min(3.0, field_score)
+        indicator_score = min(4.5, len(support.malicious_indicators) * float(weights["malicious_indicator"]))
+        scanner_score = float(weights["scanner_status"].get(support.scanner_status, 0.0))
+        recency_score = self._recency_bonus(support)
+        return max(0.0, trust_score + source_score + field_score + indicator_score + scanner_score + recency_score)
+
+    def _recency_bonus(self, support: EntitySupport) -> float:
+        weights = self.calibration.score_weights["recency"]
+        max_step = max((item.step_seen for item in self.supports), default=support.step_seen)
+        age = max(0, max_step - support.step_seen)
+        window = max(1, int(weights.get("window_steps", 5)))
+        if age >= window:
+            return 0.0
+        return float(weights.get("max_bonus", 1.0)) * ((window - age) / window)
+
+    def _corroboration_bonus(self, support: tuple[EntitySupport, ...]) -> float:
+        if len(support) <= 1:
+            return 0.0
+        weights = self.calibration.score_weights["corroboration"]
+        sources = {(item.source_table, item.evidence_id) for item in support}
+        source_tables = {item.source_table for item in support}
+        bonus = max(0, len(source_tables) - 1) * float(weights.get("per_extra_source", 1.5))
+        bonus += max(0, len(sources) - 1) * float(weights.get("per_extra_evidence", 0.5))
+        return min(float(weights.get("max_bonus", 3.0)), bonus)

@@ -25,7 +25,36 @@ Improve `soc_defender` in separate implementation sessions so each step is measu
   - Restricted SQL planner output to fixed broad templates and allowlisted entity templates.
   - Tests passed: `py -m pytest tests -q` from `soc_defender`.
   - OpenSec smokes passed for `evidence_gate_only` and `full_agentic` train limit 1.
-- Next phase: Phase 4, Evidence Scoring and Calibration.
+- Phase 4: Complete.
+  - Added calibrated support scoring by trust tier, source table, supporting fields, malicious indicators, scanner status, recency, and corroboration.
+  - Exposed scored entity candidates with supporting evidence IDs.
+  - Added action-specific containment thresholds, report-field thresholds, scanner taint policy, and containment minimum step to `soc_defender/configs/calibration.yaml`.
+  - Kept hard rejection rules for missing exact support, missing content exposure, untrusted-only support, scanner-flagged-only support, maliciousness gaps, score threshold failures, and early containment.
+  - Tests passed: `py -m pytest tests -q` from `soc_defender`.
+  - OpenSec smokes passed: `evidence_gate_only` and `full_agentic` train limit 1 with phase 4 output files.
+- Phase 5: Complete.
+  - Added richer trusted destination/domain and target extraction from alerts and process events.
+  - Added report-field confidence, provenance, conflict history, and locked-value handling.
+  - Added targeted SQL gap queries for missing `attacker_domain` and `data_target`.
+  - Rejected containment now emits one evidence-seeking query instead of looping on the same failed action.
+  - Domain blocking now requires malicious trusted network or alert support, preventing email-only domain containment.
+  - Tests passed: `py -m pytest tests -q` from `soc_defender`.
+  - OpenSec smokes passed for `evidence_gate_only` and `full_agentic` train limit 1.
+- Phase 6: Complete.
+  - Extended `soc_defender/scripts/analyze_failures.py` into an OpenSec JSONL
+    post-processor for reward, EGAR, time to first containment, containment
+    correct/false-positive totals, report submission, injection exposure, and
+    injection violations.
+  - Added frozen calibration config fingerprinting to analysis output.
+  - Added `opensec-env/configs/soc_defender_ablations.yaml` and `agent_mode`
+    support in the OpenSec agent bridge for named ablations over existing
+    runtime modes.
+  - Documented train calibration, ablation, and frozen final eval command
+    sequences in `soc_defender/docs/opensec_train_eval_workflow.md`.
+  - Focused analyzer tests passed: `py -m pytest tests\test_analyze_failures.py -q`.
+  - Full tests passed: `py -m pytest -q`.
+  - OpenSec ablation smoke passed: `py -3.13 scripts\eval.py --config configs\soc_defender_ablations.yaml --models full_agentic_no_llm --split train --limit 1 --output outputs\agents\full_agentic_no_llm_phase6_smoke.jsonl`.
+- Next phase: Phase 7, RAG as Advisory Context.
 
 Before implementation starts, save this complete plan to:
 
@@ -177,6 +206,8 @@ Acceptance criteria:
 
 ## Phase 4: Evidence Scoring and Calibration
 
+Status: Complete.
+
 Goal: replace binary gating with calibrated support scoring while preserving fail-closed containment.
 
 TODO:
@@ -237,6 +268,8 @@ Acceptance criteria:
 - Containment false positives do not increase.
 
 ## Phase 6: Metrics and Ablations Through OpenSec Eval
+
+Status: Complete.
 
 Goal: make all results reproducible through OpenSec's benchmark runner.
 

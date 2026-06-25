@@ -76,7 +76,8 @@ class Responder:
                 candidate.entity_value,
                 self.policy.registry,
                 step_index=parsed.step_index,
-                containment_min_step=self.policy.containment_min_step,
+                containment_min_step=int(self.policy.containment_min_step or 0),
+                calibration=self.policy.calibration,
             )
             return VerifiedActionCandidate(
                 action_type=candidate.action_type,
@@ -124,5 +125,8 @@ def verified_candidate_payload(candidate: VerifiedActionCandidate) -> dict[str, 
             "approved": decision.approved,
             "reason": decision.reason,
             "support_count": len(decision.support),
+            "score": decision.score,
+            "threshold": decision.threshold,
+            "evidence_ids": list(decision.evidence_ids),
         }
     return payload

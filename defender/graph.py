@@ -112,7 +112,7 @@ class DefenderGraph:
             step_index=state.open_sec_step_index,
             max_steps=self.policy.max_steps,
             report_deadline_step=deadline,
-            containment_min_step=self.policy.containment_min_step,
+            containment_min_step=int(self.policy.containment_min_step or 0),
         ).to_dict()
         state.append_trace("budget", state.budget_state)
 

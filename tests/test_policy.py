@@ -1,4 +1,5 @@
 from defender.policy import DefenderPolicy
+from defender.calibration import CalibrationConfig
 
 
 def test_policy_records_failed_last_emitted_query():
@@ -77,3 +78,31 @@ def test_gated_containment_skips_untracked_suspicious_entities():
     )
 
     assert policy._next_gated_containment(5, {"isolated_hosts": [], "blocked_domains": [], "reset_users": []}) is None
+
+
+def test_policy_uses_calibrated_containment_min_step_by_default():
+    calibration = CalibrationConfig(containment_min_step=7)
+    policy = DefenderPolicy(calibration=calibration)
+
+    assert policy.containment_min_step == 7
+    assert policy.registry.calibration is calibration
+    assert policy.report_tracker.calibration is calibration
+
+
+def test_rejected_domain_containment_returns_targeted_evidence_query():
+    policy = DefenderPolicy(containment_min_step=1)
+    policy.registry.add_row(
+        {
+            "email_id": "email-domain",
+            "body": "credential phish dst_domain=evil.example",
+            "trust_tier": "verified",
+        },
+        step_seen=1,
+    )
+    policy.report_tracker.update(policy.registry)
+
+    action = policy._next_gated_containment(5, {"isolated_hosts": [], "blocked_domains": [], "reset_users": []})
+
+    assert action.action_type == "query_logs"
+    assert action.params["sql"] == "SELECT * FROM netflow WHERE dst_domain IS NOT NULL ORDER BY step DESC LIMIT 20"
+    assert ("block_domain", "evil.example") in policy.attempted_containment

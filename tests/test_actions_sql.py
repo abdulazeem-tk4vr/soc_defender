@@ -71,3 +71,15 @@ def test_sql_planner_gap_directed_queries_and_repeat_rotation():
         planner.action_for_sql(planner.next_broad_query({"attacker_domain"}))
 
     assert planner.emitted_counts["SELECT * FROM alerts ORDER BY step DESC LIMIT 20"] <= 2
+
+
+def test_sql_planner_targeted_gap_queries_are_allowlisted():
+    planner = SQLPlanner()
+
+    domain_query = planner.action_for_sql(planner.next_gap_query("attacker_domain")).params["sql"]
+    target_query = planner.action_for_sql(planner.next_gap_query("data_target")).params["sql"]
+
+    assert domain_query == "SELECT * FROM netflow WHERE dst_domain IS NOT NULL ORDER BY step DESC LIMIT 20"
+    assert target_query == "SELECT * FROM process_events WHERE target_id IS NOT NULL ORDER BY step DESC LIMIT 20"
+    assert is_allowlisted_template(domain_query)
+    assert is_allowlisted_template(target_query)
