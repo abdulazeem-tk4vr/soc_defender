@@ -14,9 +14,9 @@
   "objective_counts": {
     "corroborate_containment": 12933,
     "find_attacker_domain": 1440,
-    "find_data_target": 1440,
+    "find_data_target": 2880,
     "find_identity": 1440,
-    "find_patient_zero": 2880,
+    "find_patient_zero": 1440,
     "submit_report": 1440
   },
   "objective_labels": [
@@ -30,9 +30,9 @@
   "objective_priors": {
     "corroborate_containment": 0.5994993742177722,
     "find_attacker_domain": 0.06675010429703797,
-    "find_data_target": 0.06675010429703797,
+    "find_data_target": 0.13350020859407594,
     "find_identity": 0.06675010429703797,
-    "find_patient_zero": 0.13350020859407594,
+    "find_patient_zero": 0.06675010429703797,
     "submit_report": 0.06675010429703797
   }
 }

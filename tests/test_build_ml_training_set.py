@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from scripts.build_ml_training_set import TrainPathError, assert_train_only_path, build_training_set
+from scripts.build_ml_training_set import TrainPathError, assert_train_only_path, build_examples_for_split, build_training_set
 
 
 def _write_seed_pair(train_dir):
@@ -116,6 +116,8 @@ def test_build_training_set_emits_deterministic_labels(tmp_path):
     host_positive = next(
         row for row in rows if row["step_index"] == 1 and row["candidate_value"] == "h-999-01"
     )
+    assert host_positive["report_values"]["patient_zero_host"] == "unknown"
+    assert host_positive["labels"]["investigation_objective"] == "find_patient_zero"
     assert host_positive["labels"]["report_field"] == "patient_zero_host"
     assert host_positive["labels"]["containment_sufficiency"] == "sufficient_evidence"
 
@@ -128,5 +130,38 @@ def test_build_training_set_emits_deterministic_labels(tmp_path):
     domain_positive = next(
         row for row in rows if row["step_index"] == 4 and row["candidate_value"] == "evil.example"
     )
+    assert domain_positive["report_values"] == {
+        "patient_zero_host": "h-999-01",
+        "compromised_user": "u-999",
+        "attacker_domain": "unknown",
+        "data_target": "t-999",
+        "initial_vector": "phish",
+    }
+    assert domain_positive["labels"]["investigation_objective"] == "find_attacker_domain"
     assert domain_positive["labels"]["report_field"] == "attacker_domain"
     assert domain_positive["labels"]["containment_sufficiency"] == "sufficient_evidence"
+
+    final_row = next(row for row in rows if row["step_index"] == 5 and row["candidate_value"] == "evil.example")
+    assert final_row["labels"]["investigation_objective"] == "submit_report"
+
+
+def test_build_examples_for_split_allows_eval_without_training_output(tmp_path):
+    eval_dir = tmp_path / "eval"
+    eval_dir.mkdir()
+    _write_seed_pair(eval_dir)
+
+    examples, summary = build_examples_for_split(eval_dir, split="eval")
+
+    assert summary["split"] == "eval"
+    assert summary["seeds"] == 1
+    assert summary["examples"] == len(examples)
+    assert any(row["labels"]["report_field"] == "attacker_domain" for row in examples)
+
+
+def test_build_examples_for_split_rejects_eval_when_split_is_train(tmp_path):
+    eval_dir = tmp_path / "eval"
+    eval_dir.mkdir()
+    _write_seed_pair(eval_dir)
+
+    with pytest.raises(TrainPathError):
+        build_examples_for_split(eval_dir, split="train")

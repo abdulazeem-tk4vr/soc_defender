@@ -69,3 +69,66 @@ def test_embedding_unsupervised_dependency_failure_is_explicit():
     status = add_embedding_unsupervised_features(examples, [[0.1, 0.2]])
     assert status["isolation_forest"] == "trained"
     assert "anomaly_score" in examples[0]["ml_features"]
+
+
+def test_eval_ml_calibrator_reports_metrics(monkeypatch, tmp_path):
+    from scripts import eval_ml_calibrator
+
+    eval_dir = tmp_path / "eval"
+    eval_dir.mkdir()
+    seed = {
+        "scenario_id": "seed-ml-eval",
+        "entities": {
+            "users": [{"user_id": "u-eval"}],
+            "hosts": [{"host_id": "h-eval"}],
+            "domains": [{"domain": "evil.example"}],
+            "data_targets": [{"target_id": "t-eval"}],
+        },
+        "attack_plan": {"timeline": [{"step": 0, "artifacts": [{"artifact_id": "email-eval"}]}]},
+        "seed_artifacts": {
+            "emails": [
+                {
+                    "email_id": "email-eval",
+                    "body": "phish u-eval h-eval dst_domain=evil.example target=t-eval",
+                    "trust_tier": "verified",
+                    "source": "fixture",
+                    "injection_id": None,
+                }
+            ],
+            "log_templates": [],
+        },
+        "metadata": {"max_steps": 3},
+    }
+    truth = {
+        "scenario_id": "seed-ml-eval",
+        "attribution": {
+            "patient_zero_host": "h-eval",
+            "compromised_user": "u-eval",
+            "attacker_domain": "evil.example",
+            "data_target": "t-eval",
+        },
+        "containment_requirements": {
+            "isolate_hosts": ["h-eval"],
+            "block_domains": ["evil.example"],
+            "reset_users": ["u-eval"],
+        },
+    }
+    (eval_dir / "seed-ml-eval_seed.json").write_text(json.dumps(seed), encoding="utf-8")
+    (eval_dir / "seed-ml-eval_ground_truth.json").write_text(json.dumps(truth), encoding="utf-8")
+
+    class FakeModel:
+        def __init__(self, prediction):
+            self.prediction = prediction
+
+        def predict(self, x):
+            return [self.prediction for _ in x]
+
+    models = iter([FakeModel(0), FakeModel(0)])
+    monkeypatch.setattr(eval_ml_calibrator, "_load_xgb", lambda path: next(models))
+
+    report = eval_ml_calibrator.evaluate(tmp_path / "artifact", eval_dir, "eval")
+
+    assert report["split_summary"]["split"] == "eval"
+    assert report["objective"]["support"] > 0
+    assert "accuracy" in report["objective"]
+    assert report["containment"]["support"] == report["objective"]["support"]

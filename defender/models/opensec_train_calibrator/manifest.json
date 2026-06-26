@@ -1,6 +1,6 @@
 {
   "artifact_version": "opensec-train-calibrator-v1",
-  "created_at_unix": 1782438560.2734256,
+  "created_at_unix": 1782445180.5967114,
   "example_count": 21573,
   "feature_schema_hash": "452ae9585a05a02d4c4542ac8ae78f7325805f016e45308adfddb10f8a1a5f2b",
   "feature_schema_version": "ml-features-v1",
@@ -166,9 +166,9 @@
     "seed-159",
     "seed-160"
   ],
-  "source_examples": "outputs/ml_training/train_examples.jsonl",
+  "source_examples": "outputs/ml_training/train_examples_state_v1.jsonl",
   "source_split": "train",
-  "source_train_dir": "/workspace/opensec-env/data/seeds/train",
+  "source_train_dir": "../opensec-env/data/seeds/train",
   "training_status": {
     "containment_classes": [
       "insufficient_evidence",

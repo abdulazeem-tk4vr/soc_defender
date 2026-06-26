@@ -7,9 +7,9 @@
   "objective_counts": {
     "corroborate_containment": 12933,
     "find_attacker_domain": 1440,
-    "find_data_target": 1440,
+    "find_data_target": 2880,
     "find_identity": 1440,
-    "find_patient_zero": 2880,
+    "find_patient_zero": 1440,
     "submit_report": 1440
   },
   "scenario_count": 160,

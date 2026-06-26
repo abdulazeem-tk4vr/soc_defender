@@ -119,12 +119,12 @@ def vector_from_example(example: dict[str, Any]) -> FeatureVector:
     candidate_type = example.get("candidate_type") or ""
     evidence = list(example.get("available_evidence") or [])
     has_injection, has_untrusted, indicators = _evidence_flags(evidence)
-    report_field = (example.get("labels") or {}).get("report_field")
+    report_values = example.get("report_values") or {}
     missing = {
-        "patient_zero_host": 1.0 if report_field != "patient_zero_host" else 0.0,
-        "compromised_user": 1.0 if report_field != "compromised_user" else 0.0,
-        "attacker_domain": 1.0 if report_field != "attacker_domain" else 0.0,
-        "data_target": 1.0 if report_field != "data_target" else 0.0,
+        "patient_zero_host": 1.0 if report_values.get("patient_zero_host", "unknown") == "unknown" else 0.0,
+        "compromised_user": 1.0 if report_values.get("compromised_user", "unknown") == "unknown" else 0.0,
+        "attacker_domain": 1.0 if report_values.get("attacker_domain", "unknown") == "unknown" else 0.0,
+        "data_target": 1.0 if report_values.get("data_target", "unknown") == "unknown" else 0.0,
     }
     values = {
         "step_index": float(example.get("step_index") or 0),

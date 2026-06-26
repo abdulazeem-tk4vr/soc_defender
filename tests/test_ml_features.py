@@ -18,6 +18,12 @@ def test_vector_from_example_is_fixed_width_numeric():
                 "indicators": ["exfil", "dst_domain"],
             }
         ],
+        "report_values": {
+            "patient_zero_host": "h-1",
+            "compromised_user": "u-1",
+            "attacker_domain": "unknown",
+            "data_target": "t-1",
+        },
         "labels": {"report_field": "attacker_domain"},
     }
 
@@ -31,6 +37,8 @@ def test_vector_from_example_is_fixed_width_numeric():
     assert mapping["has_prompt_injection_target"] == 1.0
     assert mapping["has_injection_evidence"] == 1.0
     assert mapping["indicator_exfil"] == 1.0
+    assert mapping["missing_attacker_domain"] == 1.0
+    assert mapping["missing_data_target"] == 0.0
     assert mapping["cluster_id"] == 0.0
     assert mapping["anomaly_score"] == 0.0
     assert validate_feature_schema(feature_schema()) is True
