@@ -42,19 +42,6 @@ class ReportDecision:
     submit: bool
     reason: str
     best_next_gain: float
-    pending_containment_gain: float = 0.0
-    recent_zero_value_steps: int = 0
-    exhausted_fields: tuple[str, ...] = ()
-
-    def to_dict(self) -> dict[str, object]:
-        return {
-            "submit": self.submit,
-            "reason": self.reason,
-            "best_next_gain": self.best_next_gain,
-            "pending_containment_gain": self.pending_containment_gain,
-            "recent_zero_value_steps": self.recent_zero_value_steps,
-            "exhausted_fields": list(self.exhausted_fields),
-        }
 
 
 def report_decision(policy: DefenderPolicy, parsed: ParsedObservation) -> ReportDecision:
@@ -63,44 +50,12 @@ def report_decision(policy: DefenderPolicy, parsed: ParsedObservation) -> Report
 
     containment_gain = pending_containment_gain(policy, parsed)
     if containment_gain > STEP_COST:
-        return ReportDecision(
-            False,
-            "verified containment remains valuable",
-            containment_gain,
-            pending_containment_gain=containment_gain,
-            recent_zero_value_steps=policy.recent_zero_value_steps,
-        )
-
-    exhausted = exhausted_missing_fields(policy)
-    gaps = report_gaps(policy)
-    if gaps and gaps.issubset(exhausted) and policy.recent_zero_value_steps >= 2:
-        return ReportDecision(
-            True,
-            "missing fields exhausted by observed no-value evidence",
-            0.0,
-            pending_containment_gain=containment_gain,
-            recent_zero_value_steps=policy.recent_zero_value_steps,
-            exhausted_fields=tuple(sorted(exhausted)),
-        )
+        return ReportDecision(False, "verified containment remains valuable", containment_gain)
 
     investigation_gain = investigation_gain_estimate(policy, parsed)
     if investigation_gain <= STEP_COST:
-        return ReportDecision(
-            True,
-            "remaining investigation is not worth another environment step",
-            investigation_gain,
-            pending_containment_gain=containment_gain,
-            recent_zero_value_steps=policy.recent_zero_value_steps,
-            exhausted_fields=tuple(sorted(exhausted)),
-        )
-    return ReportDecision(
-        False,
-        "more evidence can still improve oracle score",
-        investigation_gain,
-        pending_containment_gain=containment_gain,
-        recent_zero_value_steps=policy.recent_zero_value_steps,
-        exhausted_fields=tuple(sorted(exhausted)),
-    )
+        return ReportDecision(True, "remaining investigation is not worth another environment step", investigation_gain)
+    return ReportDecision(False, "more evidence can still improve oracle score", investigation_gain)
 
 
 def report_gaps(policy: DefenderPolicy) -> set[str]:
@@ -136,20 +91,8 @@ def pending_containment_gain(policy: DefenderPolicy, parsed: ParsedObservation) 
     return max(gains, default=0.0)
 
 
-def exhausted_missing_fields(policy: DefenderPolicy) -> set[str]:
-    exhausted = set()
-    gaps = report_gaps(policy)
-    useful_tables = _useful_tables(policy)
-    no_value_tables = _no_value_tables(policy)
-    for field in gaps:
-        sources = set(FIELD_SOURCE_TABLES[field])
-        if sources and sources.issubset(no_value_tables) and not sources.intersection(useful_tables):
-            exhausted.add(field)
-    return exhausted
-
-
 def investigation_gain_estimate(policy: DefenderPolicy, parsed: ParsedObservation) -> float:
-    gaps = report_gaps(policy) - exhausted_missing_fields(policy)
+    gaps = report_gaps(policy)
     if not gaps:
         return 0.0
 
@@ -178,20 +121,4 @@ def _tried_tables(policy: DefenderPolicy) -> set[str]:
         str(item.get("log_type"))
         for item in policy.sql_planner.query_history
         if item.get("log_type")
-    }
-
-
-def _useful_tables(policy: DefenderPolicy) -> set[str]:
-    return {
-        str(item.get("log_type"))
-        for item in policy.sql_planner.query_history
-        if item.get("log_type") and item.get("useful")
-    }
-
-
-def _no_value_tables(policy: DefenderPolicy) -> set[str]:
-    return {
-        str(item.get("log_type"))
-        for item in policy.sql_planner.query_history
-        if item.get("log_type") and item.get("ok") and not item.get("useful")
     }

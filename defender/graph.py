@@ -62,15 +62,15 @@ class DefenderGraph:
     def _registry_node(self, state: DefenderGraphState) -> None:
         parsed = state.parsed_observation or parse_observation(state.observation)
         before = len(self.policy.registry.supports)
-        self.policy._update_evidence_context(parsed)
+        self.policy.registry.update_from_observation(parsed)
+        self.policy.report_tracker.update(self.policy.registry)
+        self.policy._record_failed_query(parsed)
         state.append_trace(
             "registry",
             {
                 "supports_before_action": before,
                 "supports_after_update": len(self.policy.registry.supports),
                 "report_values": dict(self.policy.report_tracker.values),
-                "evidence_delta": dict(self.policy.last_evidence_delta),
-                "recent_zero_value_steps": self.policy.recent_zero_value_steps,
             },
         )
 
@@ -248,7 +248,6 @@ class DefenderGraph:
             "responder",
             {
                 "verifier_candidate": verified_candidate_payload(verified),
-                "reward_decision": dict(self.policy.last_report_decision),
                 "action": payload,
             },
         )
