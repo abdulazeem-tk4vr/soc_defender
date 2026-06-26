@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
+import json
+import os
+import time
+from pathlib import Path
 from typing import Any
 
 from .graph import DefenderGraph
@@ -11,7 +15,6 @@ from .observation import parse_observation
 from .policy import DefenderPolicy
 from .prompt_guard import LLMLocalizer, PromptGuard2
 from .rag import RAGIntel
-from .rag_query import RAGQueryPlanner
 from .scanner import InjectionScanner
 
 
@@ -38,7 +41,7 @@ class SocDefenderAgent:
                 policy=self.policy,
                 scanner=scanner,
                 rag=self.rag or RAGIntel(),
-                rag_query_planner=RAGQueryPlanner(self.llm_client),
+                # Keep LLM call volume bounded: investigator/verifier are the only internal LLM call sites.
                 investigator=Investigator(self.llm_client),
                 verifier=LLMVerifier(self.llm_client),
             )
@@ -57,6 +60,7 @@ class SocDefenderAgent:
             else:
                 action, state = self.graph.next_action(observation)
             self.last_graph_state = state
+            _append_agent_trace(action, state)
             return action
         action = self.policy.next_action(observation)
         if hasattr(action, "model_dump"):
@@ -88,3 +92,28 @@ def build_agent(
         prompt_guard2_model=prompt_guard2_model,
         use_langgraph=use_langgraph,
     )
+
+def _append_agent_trace(action: dict[str, Any], state: DefenderGraphState) -> None:
+    path = os.getenv("SOC_DEFENDER_TRACE_LOG")
+    if not path:
+        return
+    traces = [asdict(trace) for trace in state.traces]
+    rag_trace = next((trace for trace in traces if trace.get("node") == "rag"), {})
+    scanner_trace = next((trace for trace in traces if trace.get("node") == "scanner"), {})
+    scanner_annotations = scanner_trace.get("output_summary", {}).get("annotations", [])
+    record = {
+        "ts": time.time(),
+        "source": "soc_defender_agent_trace",
+        "scenario_id": state.scenario_id,
+        "step": state.open_sec_step_index,
+        "action_type": action.get("action_type"),
+        "params": action.get("params", {}),
+        "rag": rag_trace.get("output_summary", {}),
+        "scanner_annotations": scanner_annotations,
+        "injections_detected": sum(1 for item in scanner_annotations if item.get("status") != "clean"),
+        "graph_trace": traces,
+    }
+    log_path = Path(path)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False, sort_keys=True, default=str) + "\n")

@@ -48,7 +48,7 @@ class EntitySupport:
 
     @property
     def trusted(self) -> bool:
-        return self.trust_tier != "untrusted"
+        return self.trust_tier != "untrusted" and not self.injection_id
 
 
 def _text_from_row(row: dict[str, Any]) -> str:

@@ -29,6 +29,33 @@ Current local corpus snapshot:
 - Chunk output: `data/rag/chunks.jsonl`
 - Chunk count: 41,722
 
+## Canonical OpenSec Agent Eval
+
+Run benchmark-style eval from `opensec-env`, using OpenSec's `provider: agent` bridge into `soc_defender`. Keep `soc_defender/scripts/eval.py` for local development checks only.
+
+```bash
+cd /workspace/opensec-env
+. .venv/bin/activate
+
+python scripts/eval.py \
+  --config configs/soc_defender_ablations.yaml \
+  --models full_agentic_no_llm \
+  --split train \
+  --limit 10 \
+  --output outputs/full_agentic_no_rag_train.jsonl \
+  --llm-log outputs/full_agentic_no_rag_train_llm.jsonl
+
+python scripts/eval.py \
+  --config configs/soc_defender_agents.yaml \
+  --models full_agentic_qwen \
+  --split train \
+  --limit 10 \
+  --output outputs/full_agentic_rag_train.jsonl \
+  --llm-log outputs/full_agentic_rag_train_llm.jsonl
+```
+
+`--llm-log` records the final provider response and internal soc_defender LLM calls. Internal records use `source: soc_defender_internal_llm` and include raw text, parsed JSON, messages, schema hints, and parse/repair errors.
+
 ## Live Ollama Eval
 
 Set these locally or in `.env`:
@@ -75,11 +102,24 @@ You can also pass the URL directly:
 py -3.13 scripts\eval.py --defender full_agentic --agent-llm ollama --base-url https://your-runpod-proxy-url --ollama-model llama3.2:3b --split train --limit 1
 ```
 
-When `data/rag/qdrant/build_manifest.json` exists locally, eval auto-loads the Qdrant RAG index unless `--no-rag` is passed. You can also pass it explicitly:
+When `data/rag/qdrant/build_manifest.json` exists locally, OpenSec agent eval can load the Qdrant RAG index through `configs/soc_defender_agents.yaml`. For repeated short eval launches, prefer the persistent RAG service so the query embedder and Qdrant client stay loaded:
 
-```powershell
-py -3.13 scripts\eval.py --defender full_agentic --agent-llm ollama --rag-path data\rag\qdrant --rag-device cuda --split train --limit 1
+```bash
+# Terminal 1, from soc_defender
+python scripts/rag_server.py --qdrant-path data/rag/qdrant --device cuda --host 127.0.0.1 --port 8765
+
+# Terminal 2, from opensec-env
+export SOC_DEFENDER_RAG_URL=http://127.0.0.1:8765
+python scripts/eval.py \
+  --config configs/soc_defender_agents.yaml \
+  --models full_agentic_qwen \
+  --split train \
+  --limit 10 \
+  --output outputs/full_agentic_rag_train.jsonl \
+  --llm-log outputs/full_agentic_rag_train_llm.jsonl
 ```
+
+Unset `SOC_DEFENDER_RAG_URL` to return to direct embedded-Qdrant loading from the config `rag_path`.
 
 ## RunPod RAG Embedding Build
 

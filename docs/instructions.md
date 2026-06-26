@@ -145,27 +145,42 @@ OLLAMA_BASE_URL=https://your-id.proxy.runpod.net
 OLLAMA_MODEL=llama3.2:3b
 ```
 
-`soc_defender/scripts/eval.py` loads `.env` automatically and uses `--ollama` to route defender LLM calls to this URL (same pattern as `opensec-env/scripts/eval.py`).
+For benchmark runs, use the OpenSec runner from `../opensec-env`. It loads `.env` and bridges to `soc_defender` through `provider: agent` configs. `soc_defender/scripts/eval.py` is a development helper only.
 
-Optional: pass URL per run without editing `.env`:
-
-```bash
-python scripts/eval.py --ollama --base-url https://your-id.proxy.runpod.net --defender baseline --limit 40
-```
-
-### Baseline vs agentic comparison (same remote model)
-
-Use the **same** `OLLAMA_BASE_URL` and `OLLAMA_MODEL` for both runs — only `--defender` changes:
+Optional: set the URL per shell without editing `.env`:
 
 ```bash
-cd soc_defender
-
-# Naive baseline: direct LLM → action (no defender pipeline)
-python scripts/eval.py --ollama --defender baseline --limit 40
-
-# Full agentic defender (scanner + RAG + verifier + responder)
-python scripts/eval.py --ollama --defender full_agentic --limit 40
+export OLLAMA_BASE_URL=https://your-id.proxy.runpod.net
+export OLLAMA_MODEL=llama3.2:3b
 ```
+
+### OpenSec agent-mode eval with LLM logs
+
+Use the **same** `OLLAMA_BASE_URL` and `OLLAMA_MODEL` for comparable runs. Run from `opensec-env`, not from `soc_defender`, when producing benchmark outputs.
+
+```bash
+cd ../opensec-env
+
+# Agentic without RAG, deterministic internal logic.
+python scripts/eval.py \
+  --config configs/soc_defender_ablations.yaml \
+  --models full_agentic_no_llm \
+  --split train \
+  --limit 10 \
+  --output outputs/full_agentic_no_rag_train.jsonl \
+  --llm-log outputs/full_agentic_no_rag_train_llm.jsonl
+
+# Agentic with RAG and Ollama-backed internal LLM calls.
+python scripts/eval.py \
+  --config configs/soc_defender_agents.yaml \
+  --models full_agentic_qwen \
+  --split train \
+  --limit 10 \
+  --output outputs/full_agentic_rag_train.jsonl \
+  --llm-log outputs/full_agentic_rag_train_llm.jsonl
+```
+
+`--llm-log` writes JSONL records for OpenSec's provider-level response. For `provider: agent`, OpenSec also sets `SOC_DEFENDER_LLM_LOG`, so internal soc_defender responses are appended to the same file with `source: soc_defender_internal_llm`. Those records include raw text, parsed JSON, messages, schema hints, and parse/repair errors.
 
 ### What runs where
 
@@ -252,14 +267,41 @@ rsync -avz runpod:/workspace/soc_defender/data/rag/chunks.jsonl ./soc_defender/d
 
 Optional: also sync `data/models/securebert-plus/` if you do not want to re-download locally.
 
-**Step 5 — Local eval (Qdrant + remote Ollama)**
+**Step 5 - Local eval (Qdrant + remote Ollama)**
+
+Canonical benchmark eval runs from `opensec-env`:
 
 ```bash
-cd soc_defender
-python scripts/eval.py --ollama --defender full_agentic --limit 40
+cd ../opensec-env
+python scripts/eval.py \
+  --config configs/soc_defender_agents.yaml \
+  --models full_agentic_qwen \
+  --split train \
+  --limit 40 \
+  --output outputs/full_agentic_rag_train.jsonl \
+  --llm-log outputs/full_agentic_rag_train_llm.jsonl
 ```
 
-At eval time, SecureBERT+ only embeds **one query per step** — fast on CPU. The heavy work was the one-time index build.
+At eval time, SecureBERT+ only embeds **one query per step**. To avoid loading the embedding model for each separate eval process, start the persistent RAG service once from `soc_defender` and point OpenSec eval at it:
+
+```bash
+# Terminal 1
+cd ../soc_defender
+python scripts/rag_server.py --qdrant-path data/rag/qdrant --device cuda --host 127.0.0.1 --port 8765
+
+# Terminal 2
+cd ../opensec-env
+export SOC_DEFENDER_RAG_URL=http://127.0.0.1:8765
+python scripts/eval.py \
+  --config configs/soc_defender_agents.yaml \
+  --models full_agentic_qwen \
+  --split train \
+  --limit 40 \
+  --output outputs/full_agentic_rag_train.jsonl \
+  --llm-log outputs/full_agentic_rag_train_llm.jsonl
+```
+
+The heavy corpus embedding remains the one-time index build. The persistent RAG service reuses the query embedder and Qdrant client across eval launches.
 
 ### Same pod as Ollama?
 
@@ -298,13 +340,19 @@ Preflight is run automatically by `eval.py --ollama`; skip with `--skip-prefligh
 Example runs (with remote RunPod Ollama):
 
 ```bash
-# Agentic defender (this project)
-cd soc_defender
-python scripts/eval.py --ollama --defender full_agentic --limit 40
-
-# Unchanged OpenSec baseline (sibling, for comparison — same Ollama URL)
 cd ../opensec-env
-python scripts/eval.py --ollama --limit 40
+
+# Agentic defender through OpenSec provider: agent.
+python scripts/eval.py \
+  --config configs/soc_defender_agents.yaml \
+  --models full_agentic_qwen \
+  --split train \
+  --limit 40 \
+  --output outputs/full_agentic_rag_train.jsonl \
+  --llm-log outputs/full_agentic_rag_train_llm.jsonl
+
+# Direct OpenSec LLM baseline, same Ollama URL/model.
+python scripts/eval.py --config configs/baselines.yaml --models qwen2.5:14b --split train --limit 40 --output outputs/qwen_baseline_train.jsonl --llm-log outputs/qwen_baseline_train_llm.jsonl
 ```
 
 ## Confirmed prerequisites

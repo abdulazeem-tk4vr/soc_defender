@@ -71,6 +71,33 @@ class Responder:
         candidate: VerifierCandidate,
     ) -> VerifiedActionCandidate:
         if candidate.action_type in CONTAINMENT_BUILDERS and candidate.entity_value:
+            done = {
+                "isolate_host": set(parsed.containment.get("isolated_hosts") or []),
+                "block_domain": set(parsed.containment.get("blocked_domains") or []),
+                "reset_user": set(parsed.containment.get("reset_users") or []),
+            }.get(candidate.action_type, set())
+            required_entity = {
+                "isolate_host": self.policy.report_tracker.values.get("patient_zero_host"),
+                "block_domain": self.policy.report_tracker.values.get("attacker_domain"),
+                "reset_user": self.policy.report_tracker.values.get("compromised_user"),
+            }.get(candidate.action_type)
+            key = (candidate.action_type, candidate.entity_value)
+            if required_entity and required_entity != "unknown" and candidate.entity_value != required_entity:
+                return VerifiedActionCandidate(
+                    action_type=candidate.action_type,
+                    entity_value=candidate.entity_value,
+                    gate_decision=GateDecision(False, "containment target is not the current required report entity", ()),
+                    rationale=candidate.rationale,
+                    confidence=candidate.confidence,
+                )
+            if candidate.entity_value in done or key in self.policy.attempted_containment:
+                return VerifiedActionCandidate(
+                    action_type=candidate.action_type,
+                    entity_value=candidate.entity_value,
+                    gate_decision=GateDecision(False, "containment already attempted or completed", ()),
+                    rationale=candidate.rationale,
+                    confidence=candidate.confidence,
+                )
             decision = gate_containment(
                 candidate.action_type,
                 candidate.entity_value,
@@ -106,7 +133,8 @@ class Responder:
                 self.policy.fetched_emails.add(email_id)
                 return fetch_email(email_id)
         if intent.intent_type == "query_logs" and intent.entity_value:
-            return self.policy.sql_planner.query_for_entity(intent.entity_value, intent.entity_type or "")
+            report_gaps = {key for key, value in self.policy.report_tracker.values.items() if value == "unknown"}
+            return self.policy.sql_planner.query_for_entity(intent.entity_value, intent.entity_type or "", report_gaps)
         return None
 
 
