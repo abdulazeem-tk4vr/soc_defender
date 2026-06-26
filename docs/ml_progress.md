@@ -20,8 +20,8 @@ Implemented so far:
 - Threaded the optional calibrator through `build_agent`, `SocDefenderAgent`, `DefenderPolicy`, and graph trace state.
 - Added ML objective-guided SQL query selection behind available artifact scores.
 - Added `scripts/build_ml_training_set.py` for train-only step/candidate JSONL examples.
-- Added `scripts/train_ml_calibrator.py` to package train artifacts, schemas, label priors, reports, and optional XGBoost/IsolationForest/HDBSCAN models when dependencies are installed.
-- Added tests for artifact fallback, train/eval path guards, deterministic dataset labels, feature stability, artifact packaging, and ML-guided planner choice.
+- Added `scripts/train_ml_calibrator.py` to package train artifacts, schemas, label priors, reports, optional XGBoost/IsolationForest/HDBSCAN models, and optional SecureBERT2 embedding cache/feature generation when dependencies are installed.
+- Added tests for artifact fallback, train/eval path guards, deterministic dataset labels, feature stability, embedding cache I/O, artifact packaging, and ML-guided planner choice.
 
 Verification so far:
 
@@ -32,6 +32,7 @@ Verification so far:
 - Artifact packaging smoke passed using the one-seed train JSONL: `outputs/ml_training/artifact_smoke`.
 - Packaged artifact loaded through `build_agent(..., ml_config={"enabled": true, "artifact_dir": "outputs/ml_training/artifact_smoke"})`.
 - Final full suite passed after the second slice: `65 passed`.
+- Embedding pipeline code path added and focused tests passed. Current environment is missing `sentence-transformers`, `xgboost`, `hdbscan`, `scikit-learn`, and `joblib`, so real SecureBERT2 artifact training was not run here.
 
 ## Objective
 
@@ -214,7 +215,7 @@ Acceptance checks:
 
 ## Phase 2: Feature And Embedding Pipeline
 
-Status: structured feature schema implemented, SecureBERT2 embedding path pending
+Status: structured feature schema and optional SecureBERT2 embedding/cache path implemented; real embedding run pending dependency install
 
 Goal: turn examples into stable numeric features with SecureBERT2 embeddings and unsupervised calibration features.
 
@@ -271,7 +272,7 @@ Acceptance checks:
 
 ## Phase 3: XGBoost Model Training
 
-Status: training/artifact script implemented, live optional dependency training pending
+Status: training/artifact script and optional embedding/XGBoost/unsupervised paths implemented; live optional dependency training pending
 
 Goal: train two advisory models and produce inspectable calibration reports.
 

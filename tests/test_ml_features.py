@@ -31,4 +31,6 @@ def test_vector_from_example_is_fixed_width_numeric():
     assert mapping["has_prompt_injection_target"] == 1.0
     assert mapping["has_injection_evidence"] == 1.0
     assert mapping["indicator_exfil"] == 1.0
+    assert mapping["cluster_id"] == 0.0
+    assert mapping["anomaly_score"] == 0.0
     assert validate_feature_schema(feature_schema()) is True

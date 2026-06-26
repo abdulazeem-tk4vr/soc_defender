@@ -38,6 +38,10 @@ FEATURE_NAMES = [
     "indicator_target",
     "indicator_exfil",
     "indicator_dst_domain",
+    "cluster_id",
+    "cluster_probability",
+    "cluster_is_noise",
+    "anomaly_score",
 ]
 OBJECTIVE_LABELS = [
     "find_identity",
@@ -149,6 +153,11 @@ def vector_from_example(example: dict[str, Any]) -> FeatureVector:
     }
     for indicator in INDICATORS:
         values[f"indicator_{indicator}"] = float(indicators[indicator])
+    ml_features = example.get("ml_features") or {}
+    values["cluster_id"] = _count(ml_features, "cluster_id")
+    values["cluster_probability"] = _count(ml_features, "cluster_probability")
+    values["cluster_is_noise"] = _count(ml_features, "cluster_is_noise")
+    values["anomaly_score"] = _count(ml_features, "anomaly_score")
     return FeatureVector(list(FEATURE_NAMES), [float(values[name]) for name in FEATURE_NAMES])
 
 

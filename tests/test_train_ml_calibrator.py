@@ -1,7 +1,7 @@
 import json
 
 from defender.ml_features import feature_schema_hash
-from scripts.train_ml_calibrator import write_artifacts
+from scripts.train_ml_calibrator import add_embedding_unsupervised_features, load_embedding_cache, save_embedding_cache, write_artifacts
 
 
 def test_write_artifacts_creates_train_manifest_and_schemas(tmp_path):
@@ -42,3 +42,30 @@ def test_write_artifacts_creates_train_manifest_and_schemas(tmp_path):
     assert saved_manifest["feature_schema_hash"] == feature_schema_hash(schema)
     assert label_schema["objective_counts"] == {"find_patient_zero": 1}
     assert label_schema["containment_priors"]["sufficient_evidence"] == 1.0
+
+
+
+def test_embedding_cache_round_trip(tmp_path):
+    cache_path = tmp_path / "cache.jsonl"
+    cache = {"abc": [0.1, 0.2], "def": [0.3, 0.4]}
+
+    save_embedding_cache(cache_path, cache)
+
+    assert load_embedding_cache(cache_path) == cache
+
+
+def test_embedding_unsupervised_dependency_failure_is_explicit():
+    examples = [{"available_evidence": [], "labels": {}}]
+    try:
+        import sklearn  # noqa: F401
+    except Exception:
+        import pytest
+        from scripts.train_ml_calibrator import OptionalDependencyError
+
+        with pytest.raises(OptionalDependencyError):
+            add_embedding_unsupervised_features(examples, [[0.1, 0.2]])
+        return
+
+    status = add_embedding_unsupervised_features(examples, [[0.1, 0.2]])
+    assert status["isolation_forest"] == "trained"
+    assert "anomaly_score" in examples[0]["ml_features"]
