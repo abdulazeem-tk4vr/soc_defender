@@ -1,3 +1,5 @@
+import json
+
 from defender.investigator import Investigator, LLMVerifier
 from defender.llm import StaticJSONLLMClient, extract_json_object
 from defender.evidence_registry import EvidenceRegistry
@@ -65,3 +67,18 @@ def test_static_llm_records_trace():
 
     assert llm.traces[0].backend == "static"
     assert llm.traces[0].parsed == {"intent_type": "wait"}
+
+def test_static_llm_writes_jsonl_trace_when_log_env_set(tmp_path, monkeypatch):
+    log_path = tmp_path / "llm.jsonl"
+    monkeypatch.setenv("SOC_DEFENDER_LLM_LOG", str(log_path))
+    llm = StaticJSONLLMClient({"intent_type": "wait"})
+
+    llm.complete_json([{"role": "user", "content": "state"}], schema_hint={"intent_type": "string"})
+
+    record = json.loads(log_path.read_text().strip())
+    assert record["source"] == "soc_defender_internal_llm"
+    assert record["backend"] == "static"
+    assert record["raw_text"] == '{"intent_type": "wait"}'
+    assert record["parsed"] == {"intent_type": "wait"}
+    assert record["messages"] == [{"role": "user", "content": "state"}]
+    assert record["schema_hint"] == {"intent_type": "string"}

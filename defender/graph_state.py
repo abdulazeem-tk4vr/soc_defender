@@ -21,6 +21,7 @@ class DefenderGraphState:
     scanner_annotations: list[dict[str, Any]] = field(default_factory=list)
     rag_query: str = ""
     rag_context: list[dict[str, Any]] = field(default_factory=list)
+    episode_summary: dict[str, Any] = field(default_factory=dict)
     investigation_intent: dict[str, Any] = field(default_factory=dict)
     budget_state: dict[str, Any] = field(default_factory=dict)
     verifier_candidate: dict[str, Any] = field(default_factory=dict)

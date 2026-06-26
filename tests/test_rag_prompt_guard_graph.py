@@ -4,7 +4,7 @@ from defender.investigator import Investigator, LLMVerifier
 from defender.llm import StaticJSONLLMClient
 from defender.policy import DefenderPolicy
 from defender.prompt_guard import LLMLocalizer, PromptGuard, PromptGuard2
-from defender.rag import LocalKeywordRAGRetriever, QdrantRAGRetriever, RAGDocument, RAGIntel
+from defender.rag import HTTPRAGRetriever, LocalKeywordRAGRetriever, QdrantRAGRetriever, RAGDocument, RAGIntel, build_rag_intel
 from defender.rag_query import RAGQueryPlanner
 
 
@@ -19,6 +19,41 @@ def test_keyword_rag_returns_ranked_context():
     docs = retriever.retrieve("exfiltration dst_domain")
 
     assert docs[0].title == "Exfiltration"
+
+
+def test_http_rag_retriever_posts_query(monkeypatch):
+    calls = []
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "documents": [
+                    {"source": "svc", "title": "Doc", "text": "body", "score": 0.8},
+                ]
+            }
+
+    def fake_post(url, json, timeout):
+        calls.append({"url": url, "json": json, "timeout": timeout})
+        return FakeResponse()
+
+    monkeypatch.setattr("defender.rag.requests.post", fake_post)
+    retriever = HTTPRAGRetriever("http://127.0.0.1:8765", timeout=3.0)
+
+    docs = retriever.retrieve("phishing", limit=2)
+
+    assert calls == [{"url": "http://127.0.0.1:8765/retrieve", "json": {"query": "phishing", "limit": 2}, "timeout": 3.0}]
+    assert docs == (RAGDocument("svc", "Doc", "body", 0.8),)
+
+
+def test_build_rag_intel_prefers_service_url(monkeypatch):
+    monkeypatch.setenv("SOC_DEFENDER_RAG_URL", "http://127.0.0.1:8765")
+
+    rag = build_rag_intel("/missing/local/qdrant")
+
+    assert isinstance(rag.retriever, HTTPRAGRetriever)
 
 
 def test_prompt_guard_and_localizer_are_deterministic_without_llm():
@@ -62,7 +97,8 @@ def test_full_agentic_agent_emits_single_action():
         }
     )
 
-    assert action == {"action_type": "fetch_alert", "params": {"alert_id": "alert-1"}}
+    assert action["action_type"] == "fetch_alert"
+    assert action["params"] == {"alert_id": "alert-1"}
 
 
 def test_graph_returns_action_and_audit_traces():
@@ -80,10 +116,9 @@ def test_graph_returns_action_and_audit_traces():
     assert [trace.node for trace in state.traces] == [
         "scanner",
         "registry",
-        "rag_query",
-        "rag",
         "budget",
         "investigator",
+        "rag",
         "verifier",
         "responder",
     ]
@@ -138,27 +173,29 @@ def test_qdrant_retriever_maps_hits_to_documents():
     assert docs[0].score == 0.9
 
 
-def test_rag_context_reaches_investigator_prompt():
-    llm = StaticJSONLLMClient(
+def test_rag_context_reaches_verifier_prompt():
+    investigator_llm = StaticJSONLLMClient(
         {
             "intent_type": "query_logs",
             "entity_type": "domain",
             "entity_value": "evil.example",
             "rationale": "corroborate domain",
             "confidence": 0.7,
+            "rag_query": "evil.example domain ttp",
         }
     )
+    verifier_llm = StaticJSONLLMClient({"action_type": "investigate"})
     graph = DefenderGraph(
         policy=DefenderPolicy(max_steps=15),
-        rag=RAGIntel(LocalKeywordRAGRetriever((RAGDocument("fixture", "Domain TTP", "evil.example exfiltration"),))),
-        investigator=Investigator(llm),
-        verifier=LLMVerifier(StaticJSONLLMClient({"action_type": "investigate"})),
+        rag=RAGIntel(LocalKeywordRAGRetriever((RAGDocument("fixture", "Domain TTP", "evil.example domain ttp raw exfiltration evidence body"),))),
+        investigator=Investigator(investigator_llm),
+        verifier=LLMVerifier(verifier_llm),
     )
 
     graph.next_action(
         {
             "scenario_id": "s-1",
-            "step_index": 2,
+            "step_index": 3,
             "attacker_state": "exfiltration via evil.example",
             "new_alerts": [],
             "containment": {},
@@ -166,9 +203,10 @@ def test_rag_context_reaches_investigator_prompt():
         }
     )
 
-    prompt = llm.traces[0].messages[1]["content"]
-    assert "rag_context" in prompt
+    prompt = verifier_llm.traces[0].messages[1]["content"]
+    assert "rag_references" in prompt
     assert "Domain TTP" in prompt
+    assert "raw exfiltration evidence body" not in prompt
     assert "budget" in prompt
 
 
@@ -183,7 +221,7 @@ def test_graph_calls_investigator_once_per_step():
     graph.next_action(
         {
             "scenario_id": "s-1",
-            "step_index": 1,
+            "step_index": 3,
             "new_alerts": [],
             "containment": {},
             "last_action_result": {"ok": True, "message": "reset", "data": {}},
@@ -260,15 +298,14 @@ def test_graph_uses_llm_planned_rag_query_for_retrieval():
     graph = DefenderGraph(
         policy=DefenderPolicy(max_steps=15),
         rag=RAGIntel(retriever),
-        rag_query_planner=RAGQueryPlanner(StaticJSONLLMClient({"query": "attacker domain netflow evidence", "rationale": "domain gap"})),
-        investigator=Investigator(StaticJSONLLMClient({"intent_type": "query_logs"})),
+        investigator=Investigator(StaticJSONLLMClient({"intent_type": "query_logs", "rag_query": "attacker domain netflow evidence"})),
         verifier=LLMVerifier(StaticJSONLLMClient({"action_type": "investigate"})),
     )
 
     _, state = graph.next_action(
         {
             "scenario_id": "s-1",
-            "step_index": 1,
+            "step_index": 3,
             "new_alerts": [],
             "containment": {},
             "last_action_result": {"ok": True, "message": "reset", "data": {}},
@@ -277,4 +314,100 @@ def test_graph_uses_llm_planned_rag_query_for_retrieval():
 
     assert retriever.queries == ["attacker domain netflow evidence"]
     assert state.rag_query == "attacker domain netflow evidence"
-    assert any(trace.node == "rag_query" and trace.output_summary["source"] == "llm" for trace in state.traces)
+    assert any(trace.node == "investigator" and trace.output_summary["rag_query"] == "attacker domain netflow evidence" for trace in state.traces)
+
+
+def test_graph_reuses_single_rag_context_after_step_three():
+    class CapturingRetriever(LocalKeywordRAGRetriever):
+        def __init__(self):
+            super().__init__((RAGDocument("fixture", "Domain", "attacker domain netflow"),))
+            self.queries = []
+
+        def retrieve(self, query: str, limit: int = 5):
+            self.queries.append(query)
+            return super().retrieve(query, limit=limit)
+
+    retriever = CapturingRetriever()
+    graph = DefenderGraph(
+        policy=DefenderPolicy(max_steps=15),
+        rag=RAGIntel(retriever),
+        investigator=Investigator(StaticJSONLLMClient({"intent_type": "query_logs", "rag_query": "attacker domain netflow evidence"})),
+        verifier=LLMVerifier(StaticJSONLLMClient({"action_type": "investigate"})),
+    )
+
+    _, first_state = graph.next_action(
+        {
+            "scenario_id": "s-1",
+            "step_index": 3,
+            "new_alerts": [],
+            "containment": {},
+            "last_action_result": {"ok": True, "message": "reset", "data": {}},
+        }
+    )
+    _, second_state = graph.next_action(
+        {
+            "scenario_id": "s-1",
+            "step_index": 4,
+            "new_alerts": [],
+            "containment": {},
+            "last_action_result": {"ok": True, "message": "query_logs", "data": {"rows": []}},
+        }
+    )
+
+    assert retriever.queries == ["attacker domain netflow evidence"]
+    assert next(trace for trace in first_state.traces if trace.node == "rag").output_summary["rag_cost"] == 1
+    second_rag = next(trace for trace in second_state.traces if trace.node == "rag")
+    assert second_rag.output_summary["rag_cost"] == 0
+    assert second_rag.output_summary["cache_hit"] is True
+
+
+def test_verifier_summary_reaches_next_investigator_prompt():
+    first_investigator = StaticJSONLLMClient({"intent_type": "query_logs", "rag_query": "attacker domain netflow evidence"})
+    verifier_llm = StaticJSONLLMClient(
+        {
+            "action_type": "investigate",
+            "episode_summary": {
+                "steps_taken": ["fetched initial evidence"],
+                "behavior_noticed": "credential access from h-001",
+                "trusted_evidence": "corroborated alert for u-001",
+                "injection_risk": "untrusted email ignored",
+                "open_gaps": ["attacker_domain"],
+                "next_focus": "query netflow for attacker domain",
+            },
+        }
+    )
+    graph = DefenderGraph(
+        policy=DefenderPolicy(max_steps=15),
+        rag=RAGIntel(LocalKeywordRAGRetriever((RAGDocument("fixture", "Domain TTP", "very long raw document body"),))),
+        investigator=Investigator(first_investigator),
+        verifier=LLMVerifier(verifier_llm),
+    )
+
+    graph.next_action(
+        {
+            "scenario_id": "s-1",
+            "step_index": 3,
+            "attacker_state": "credential_access",
+            "new_alerts": [],
+            "containment": {},
+            "last_action_result": {"ok": True, "message": "reset", "data": {}},
+        }
+    )
+
+    second_investigator = StaticJSONLLMClient({"intent_type": "query_logs"})
+    graph.investigator = Investigator(second_investigator)
+    graph.next_action(
+        {
+            "scenario_id": "s-1",
+            "step_index": 4,
+            "attacker_state": "credential_access",
+            "new_alerts": [],
+            "containment": {},
+            "last_action_result": {"ok": True, "message": "query_logs", "data": {"rows": []}},
+        }
+    )
+
+    prompt = second_investigator.traces[0].messages[1]["content"]
+    assert "credential access from h-001" in prompt
+    assert "query netflow for attacker domain" in prompt
+    assert "very long raw document body" not in prompt

@@ -26,14 +26,14 @@ Run benchmark smoke evals through OpenSec's canonical agent-mode runner:
 
 ```powershell
 cd ..\opensec-env
-py scripts\eval.py --config configs\soc_defender_agents.yaml --models evidence_gate_only --split train --limit 5
-py scripts\eval.py --config configs\soc_defender_agents.yaml --models full_agentic --split eval --limit 5 --output outputs\agents\full_agentic_eval_smoke.jsonl
+py scripts\eval.py --config configs\soc_defender_ablations.yaml --models evidence_gate_only --split train --limit 5 --output outputs\evidence_gate_train_smoke.jsonl --llm-log outputs\evidence_gate_train_smoke_llm.jsonl
+py scripts\eval.py --config configs\soc_defender_agents.yaml --models full_agentic_qwen --split train --limit 5 --output outputs\full_agentic_rag_train_smoke.jsonl --llm-log outputs\full_agentic_rag_train_smoke_llm.jsonl
 ```
 
 Use `opensec-env\scripts\eval.py` and outputs under `opensec-env\outputs` for
-benchmark claims and reported metrics. Agent-provider runs default to
-`opensec-env\outputs\agents`; LLM-provider runs default to
-`opensec-env\outputs\llms`.
+benchmark claims and reported metrics. `--llm-log` records the OpenSec
+provider-level response and, for `provider: agent`, internal soc_defender LLM
+responses from RAG-query planning, investigator, verifier, and JSON repair calls.
 
 Run the older sibling harness only for local development checks:
 
@@ -80,7 +80,18 @@ py scripts\eval.py --defender full_agentic --agent-llm ollama --split train --li
 ## RAG
 
 RAG is optional. A local Qdrant index can be supplied with `--rag-path`, or disabled
-with `--no-rag` for repeatable local experiments.
+with `--no-rag` for repeatable local experiments. For repeated eval launches, run
+the persistent RAG service once and point OpenSec agent eval at it with
+`SOC_DEFENDER_RAG_URL`; this avoids reloading the embedding model each eval run.
+
+```powershell
+# Terminal 1, from soc_defender
+py scripts\rag_server.py --qdrant-path data\rag\qdrant --device cuda --host 127.0.0.1 --port 8765
+
+# Terminal 2, from opensec-env
+$env:SOC_DEFENDER_RAG_URL = "http://127.0.0.1:8765"
+py scripts\eval.py --config configs\soc_defender_agents.yaml --models full_agentic_qwen --split train --limit 5 --llm-log outputs\full_agentic_rag_llm.jsonl
+```
 
 Useful build commands:
 

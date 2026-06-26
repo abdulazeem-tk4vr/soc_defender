@@ -24,6 +24,11 @@ class DefenderPolicy:
     fetched_alerts: set[str] = field(default_factory=set)
     attempted_containment: set[tuple[str, str]] = field(default_factory=set)
     current_scenario_id: str | None = None
+    rag_context_cache: list[dict[str, Any]] = field(default_factory=list)
+    rag_query_cache: str = ""
+    rag_called: bool = False
+    rag_call_step: int | None = None
+    episode_summary: dict[str, Any] = field(default_factory=dict)
 
     def next_action(self, observation: dict[str, Any]):
         parsed = parse_observation(observation)
@@ -69,6 +74,11 @@ class DefenderPolicy:
         self.fetched_emails.clear()
         self.fetched_alerts.clear()
         self.attempted_containment.clear()
+        self.rag_context_cache.clear()
+        self.rag_query_cache = ""
+        self.rag_called = False
+        self.rag_call_step = None
+        self.episode_summary.clear()
         self.current_scenario_id = scenario_id
 
     def _next_unseen_fetch(self, parsed):
@@ -135,7 +145,7 @@ class DefenderPolicy:
             for entity_value in self.registry.best_entities(entity_type):
                 if entity_value == "unknown":
                     continue
-                action = self.sql_planner.query_for_entity(entity_value, entity_type)
+                action = self.sql_planner.query_for_entity(entity_value, entity_type, report_gaps)
                 if action.params["sql"] not in self.sql_planner.failed_queries:
                     return action
         return self.sql_planner.action_for_sql(self.sql_planner.next_broad_query(report_gaps))
@@ -143,9 +153,29 @@ class DefenderPolicy:
     def _record_failed_query(self, parsed) -> None:
         result = parsed.last_action_result or {}
         data = result.get("data") or {}
-        if result.get("message") == "query_logs" and data.get("ok") is False:
-            if self.sql_planner.last_emitted_sql:
-                self.sql_planner.record_failure(self.sql_planner.last_emitted_sql)
+        if result.get("message") != "query_logs" or not self.sql_planner.last_emitted_sql:
+            return
+        rows = data.get("rows") if isinstance(data, dict) else []
+        rows_returned = len(rows) if isinstance(rows, list) else 0
+        ok = bool(data.get("ok", result.get("ok", True))) if isinstance(data, dict) else bool(result.get("ok", True))
+        self.sql_planner.record_result(self.sql_planner.last_emitted_sql, rows_returned, ok=ok)
+        if ok is False:
+            self.sql_planner.record_failure(self.sql_planner.last_emitted_sql)
+
+    def compact_query_history(self) -> list[dict[str, Any]]:
+        return self.sql_planner.compact_history()
+
+    def tried_approaches(self) -> list[str]:
+        return self.sql_planner.tried_approaches()
+
+    def known_entities(self) -> set[str]:
+        known = set(self.registry.content_ids) | set(self.registry.seen_ids)
+        for value in self.report_tracker.values.values():
+            if value and value != "unknown" and isinstance(value, str):
+                known.add(value)
+        for kind in ("host", "user", "domain", "target"):
+            known.update(self.registry.best_entities(kind))
+        return known
 
     def _report_deadline_step(self) -> int:
         if self.report_deadline_step is not None:

@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import json
+import os
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
+
+import requests
 
 from .embeddings import build_embedder_from_manifest
 
@@ -40,6 +43,34 @@ class LocalKeywordRAGRetriever(RAGRetriever):
                 scored.append(RAGDocument(doc.source, doc.title, doc.text, float(score)))
         scored.sort(key=lambda doc: doc.score, reverse=True)
         return tuple(scored[:limit])
+
+
+@dataclass
+class HTTPRAGRetriever(RAGRetriever):
+    base_url: str
+    timeout: float = 30.0
+
+    def retrieve(self, query: str, limit: int = 5) -> tuple[RAGDocument, ...]:
+        response = requests.post(
+            f"{self.base_url.rstrip('/')}/retrieve",
+            json={"query": query, "limit": limit},
+            timeout=self.timeout,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        docs = payload.get("documents", payload)
+        if not isinstance(docs, list):
+            raise RuntimeError("RAG service response must contain a documents list")
+        return tuple(_document_from_payload(item) for item in docs if isinstance(item, dict))
+
+
+def _document_from_payload(payload: dict[str, Any]) -> RAGDocument:
+    return RAGDocument(
+        source=str(payload.get("source") or payload.get("source_path") or "rag-service"),
+        title=str(payload.get("title") or payload.get("chunk_id") or "RAG chunk"),
+        text=str(payload.get("text") or ""),
+        score=float(payload.get("score") or 0.0),
+    )
 
 
 @dataclass
@@ -103,6 +134,11 @@ def build_rag_intel(
     embedder: TextEmbedder | None = None,
     device: str | None = None,
 ) -> RAGIntel:
+    service_url = os.getenv("SOC_DEFENDER_RAG_URL")
+    if service_url:
+        return RAGIntel(HTTPRAGRetriever(service_url))
+    if qdrant_path and str(qdrant_path).startswith(("http://", "https://")):
+        return RAGIntel(HTTPRAGRetriever(str(qdrant_path)))
     if qdrant_path and Path(qdrant_path).exists():
         path = Path(qdrant_path)
         manifest_path = path / "build_manifest.json"

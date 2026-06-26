@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -43,6 +44,27 @@ class OllamaConfig:
         )
 
 
+def _record_trace(traces: list[LLMTrace], trace: LLMTrace) -> None:
+    traces.append(trace)
+    path = os.getenv("SOC_DEFENDER_LLM_LOG")
+    if not path:
+        return
+    record = {
+        "ts": time.time(),
+        "source": "soc_defender_internal_llm",
+        "backend": trace.backend,
+        "raw_text": trace.raw_text,
+        "parsed": trace.parsed,
+        "error": trace.error,
+        "messages": trace.messages,
+        "schema_hint": trace.schema_hint,
+    }
+    log_path = os.path.abspath(path)
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    with open(log_path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False, sort_keys=True, default=str) + "\n")
+
+
 @dataclass
 class OllamaLLMClient:
     config: OllamaConfig
@@ -59,12 +81,14 @@ class OllamaLLMClient:
             repaired_text = self._complete_text(repair_prompt)
             try:
                 parsed = extract_json_object(repaired_text)
-                self.traces.append(LLMTrace("ollama", raw_text=repaired_text, parsed=parsed, messages=messages, schema_hint=schema_hint))
+                _record_trace(self.traces, LLMTrace("ollama", raw_text=text, error=str(first_error), messages=messages, schema_hint=schema_hint))
+                _record_trace(self.traces, LLMTrace("ollama", raw_text=repaired_text, parsed=parsed, messages=messages, schema_hint=schema_hint))
                 return parsed
             except Exception as second_error:
-                self.traces.append(LLMTrace("ollama", raw_text=repaired_text, error=str(second_error), messages=messages, schema_hint=schema_hint))
+                _record_trace(self.traces, LLMTrace("ollama", raw_text=text, error=str(first_error), messages=messages, schema_hint=schema_hint))
+                _record_trace(self.traces, LLMTrace("ollama", raw_text=repaired_text, error=str(second_error), messages=messages, schema_hint=schema_hint))
                 raise
-        self.traces.append(LLMTrace("ollama", raw_text=text, parsed=parsed, messages=messages, schema_hint=schema_hint))
+        _record_trace(self.traces, LLMTrace("ollama", raw_text=text, parsed=parsed, messages=messages, schema_hint=schema_hint))
         return parsed
 
     def _complete_text(self, prompt: str) -> str:
@@ -98,7 +122,7 @@ class StaticJSONLLMClient:
 
     def complete_json(self, messages: list[dict[str, str]], schema_hint: dict[str, Any] | None = None) -> dict[str, Any]:
         parsed = dict(self.response)
-        self.traces.append(LLMTrace("static", raw_text=json.dumps(parsed), parsed=parsed, messages=list(messages), schema_hint=schema_hint))
+        _record_trace(self.traces, LLMTrace("static", raw_text=json.dumps(parsed), parsed=parsed, messages=list(messages), schema_hint=schema_hint))
         return parsed
 
 
