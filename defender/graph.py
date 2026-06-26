@@ -116,6 +116,9 @@ class DefenderGraph:
         )
         state.investigation_intent = asdict(intent)
         state.append_trace("investigator", state.investigation_intent)
+        if self.policy.last_ml_objective_scores:
+            state.ml_advisory["objectives"] = dict(self.policy.last_ml_objective_scores)
+            state.append_trace("ml_objectives", state.ml_advisory["objectives"])
 
     def _budget_node(self, state: DefenderGraphState) -> None:
         deadline = self.policy._report_deadline_step()
@@ -149,6 +152,8 @@ class DefenderGraph:
         payload = action_payload(action)
         state.responder_action = payload
         state.gate_decision = verified_candidate_payload(verified).get("gate_decision") or {}
+        if self.policy.last_ml_containment_scores:
+            state.ml_advisory["containment"] = list(self.policy.last_ml_containment_scores)
         state.append_trace(
             "responder",
             {

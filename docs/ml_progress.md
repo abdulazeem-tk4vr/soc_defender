@@ -6,6 +6,33 @@ Reference plan: `/workspace/opensec-env/docs/ml_novelty.md`
 
 This document turns the train-only SecureBERT2, HDBSCAN/IsolationForest, and XGBoost calibration proposal into an implementation plan for `soc_defender`. The ML layer is advisory. It can guide investigation objective selection and add containment sufficiency scores, but it must not directly execute containment or bypass SQL safety, evidence gates, verifier selection, report readiness, or the single committed OpenSec action boundary.
 
+
+## Implementation Status
+
+Started: 2026-06-26
+
+Implemented so far:
+
+- Added disabled-by-default `ml_calibrator` config blocks to `configs/agentic_defender.yaml` and `configs/calibration.yaml`.
+- Added optional `ml` dependency group in `pyproject.toml` for future training/runtime installs.
+- Added `defender/ml_calibrator.py` with fail-closed artifact loading, advisory score types, label-prior fallback scoring, and optional XGBoost model loading.
+- Added `defender/ml_features.py` with fixed-width numeric feature schema, schema hash, example vectorization, and runtime policy-state vectorization.
+- Threaded the optional calibrator through `build_agent`, `SocDefenderAgent`, `DefenderPolicy`, and graph trace state.
+- Added ML objective-guided SQL query selection behind available artifact scores.
+- Added `scripts/build_ml_training_set.py` for train-only step/candidate JSONL examples.
+- Added `scripts/train_ml_calibrator.py` to package train artifacts, schemas, label priors, reports, and optional XGBoost/IsolationForest/HDBSCAN models when dependencies are installed.
+- Added tests for artifact fallback, train/eval path guards, deterministic dataset labels, feature stability, artifact packaging, and ML-guided planner choice.
+
+Verification so far:
+
+- Focused pytest run passed: `tests/test_ml_calibrator.py`, `tests/test_build_ml_training_set.py`, `tests/test_agent.py`, and `tests/test_policy.py`.
+- Real OpenSec train-seed builder smoke passed with `--limit 1`: 1 seed, 153 examples, schema `ml-training-v1`.
+- Full test suite passed for the first slice: `61 passed`.
+- Focused second-slice ML tests passed: `tests/test_ml_features.py`, `tests/test_ml_calibrator.py`, `tests/test_train_ml_calibrator.py`, `tests/test_build_ml_training_set.py`, and `tests/test_policy.py`.
+- Artifact packaging smoke passed using the one-seed train JSONL: `outputs/ml_training/artifact_smoke`.
+- Packaged artifact loaded through `build_agent(..., ml_config={"enabled": true, "artifact_dir": "outputs/ml_training/artifact_smoke"})`.
+- Final full suite passed after the second slice: `65 passed`.
+
 ## Objective
 
 Add a train-only ML calibration layer that improves:
@@ -84,7 +111,7 @@ outputs/ml_training/
 
 ## Phase 0: Dependency And Interface Decision
 
-Status: not started
+Status: foundation implemented, training dependencies not installed
 
 Goal: define the minimal dependency surface and stable runtime API before training code lands.
 
@@ -121,7 +148,7 @@ Acceptance checks:
 
 ## Phase 1: Train-Only Dataset Builder
 
-Status: not started
+Status: initial builder implemented, real-seed smoke pending
 
 Goal: create deterministic step-level training examples from train seeds and ground truth.
 
@@ -187,7 +214,7 @@ Acceptance checks:
 
 ## Phase 2: Feature And Embedding Pipeline
 
-Status: not started
+Status: structured feature schema implemented, SecureBERT2 embedding path pending
 
 Goal: turn examples into stable numeric features with SecureBERT2 embeddings and unsupervised calibration features.
 
@@ -244,7 +271,7 @@ Acceptance checks:
 
 ## Phase 3: XGBoost Model Training
 
-Status: not started
+Status: training/artifact script implemented, live optional dependency training pending
 
 Goal: train two advisory models and produce inspectable calibration reports.
 
@@ -282,7 +309,7 @@ Acceptance checks:
 
 ## Phase 4: Runtime ML Calibrator
 
-Status: not started
+Status: fail-closed loader/interface implemented, real scoring pending
 
 Goal: load artifacts safely and expose advisory scores to existing policy and graph code.
 
@@ -313,7 +340,7 @@ Acceptance checks:
 
 ## Phase 5: Investigation Planner Integration
 
-Status: not started
+Status: initial objective-to-SQL integration implemented behind ML availability
 
 Goal: use ML objective scores to reduce repeated broad queries and prioritize evidence sources for missing report fields.
 

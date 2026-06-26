@@ -243,6 +243,34 @@ Relevant files:
 - `scripts/analyze_failures.py`
 - `tests/test_analyze_failures.py`
 
+### ML Calibration Foundation
+
+Implemented:
+
+- Added disabled-by-default ML calibrator configuration.
+- Added optional `ml` dependency group for future training dependencies.
+- Added fail-closed `defender/ml_calibrator.py` loader/interface with schema validation, label-prior fallback scoring, support-heuristic containment scoring, and optional XGBoost model loading.
+- Added `defender/ml_features.py` with a fixed-width numeric feature schema and runtime/example vectorizers.
+- Threaded advisory ML state through agent, policy, and graph trace structures without enabling behavior changes by default.
+- Added initial ML objective-guided SQL planner selection behind available artifact scores.
+- Added `scripts/build_ml_training_set.py` for train-only step/candidate JSONL examples.
+- Added `scripts/train_ml_calibrator.py` for train artifact packaging and optional XGBoost/unsupervised training.
+- Added tests for missing/corrupt artifact fallback, train/eval path guardrails, deterministic dataset labels, feature stability, artifact packaging, and planner integration.
+
+Validation:
+
+- `python scripts/build_ml_training_set.py --train-dir /workspace/opensec-env/data/seeds/train --output outputs/ml_training/train_examples_smoke.jsonl --limit 1` produced 153 examples from 1 train seed.
+- Focused second-slice ML tests passed.
+- `python scripts/train_ml_calibrator.py --examples outputs/ml_training/train_examples_smoke.jsonl --artifact-dir outputs/ml_training/artifact_smoke --train-dir /workspace/opensec-env/data/seeds/train` packaged train-only smoke artifacts.
+- The smoke artifact loaded successfully through `build_agent` with ML enabled.
+- `python -m pytest -q` passed with 65 tests after the second slice.
+
+Partially implemented or notable limitations:
+
+- Runtime ML scoring uses label-prior and support heuristics unless optional model artifacts are present.
+- SecureBERT2 embedding generation and live XGBoost/HDBSCAN training with installed optional dependencies remain pending.
+- Planner integration is intentionally conservative and only uses ML when artifacts load successfully.
+
 ### Regex Injection Scanner
 
 Implemented:

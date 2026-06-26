@@ -7,6 +7,7 @@ from .graph import DefenderGraph
 from .graph_state import DefenderGraphState
 from .investigator import Investigator, LLMVerifier
 from .llm import LLMClient, OllamaConfig, OllamaLLMClient
+from .ml_calibrator import MLCalibrator, load_ml_calibrator
 from .observation import parse_observation
 from .policy import DefenderPolicy
 from .prompt_guard import LLMLocalizer, PromptGuard2
@@ -23,6 +24,7 @@ class SocDefenderAgent:
     rag: RAGIntel | None = None
     prompt_guard2_model: str | None = None
     use_langgraph: bool = False
+    ml_calibrator: MLCalibrator | None = None
     policy: DefenderPolicy = field(init=False)
     graph: DefenderGraph | None = field(init=False, default=None)
     last_graph_state: DefenderGraphState | None = field(init=False, default=None)
@@ -30,7 +32,7 @@ class SocDefenderAgent:
     def __post_init__(self) -> None:
         if self.mode not in {"evidence_gate_only", "full_agentic"}:
             raise ValueError(f"Unsupported soc_defender agent mode: {self.mode}")
-        self.policy = DefenderPolicy(mode=self.mode, max_steps=self.max_steps)
+        self.policy = DefenderPolicy(mode=self.mode, max_steps=self.max_steps, ml_calibrator=self.ml_calibrator)
         if self.mode == "full_agentic":
             prompt_guard2 = PromptGuard2(self.prompt_guard2_model) if self.prompt_guard2_model else None
             scanner = InjectionScanner(localizer=LLMLocalizer(self.llm_client), prompt_guard2=prompt_guard2)
@@ -74,12 +76,14 @@ def build_agent(
     rag: RAGIntel | None = None,
     prompt_guard2_model: str | None = None,
     use_langgraph: bool = False,
+    ml_config: dict[str, Any] | None = None,
 ) -> SocDefenderAgent:
     llm_client: LLMClient | None = None
     if agent_llm == "ollama":
         llm_client = OllamaLLMClient(OllamaConfig.from_env())
     elif agent_llm != "none":
         raise ValueError(f"Unsupported agent LLM backend: {agent_llm}")
+    ml_calibrator = load_ml_calibrator(ml_config)
     return SocDefenderAgent(
         mode=mode,
         max_steps=max_steps,
@@ -87,4 +91,5 @@ def build_agent(
         rag=rag,
         prompt_guard2_model=prompt_guard2_model,
         use_langgraph=use_langgraph,
+        ml_calibrator=ml_calibrator,
     )

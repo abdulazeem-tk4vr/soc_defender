@@ -4,3 +4,9 @@ calibration:
   notes: "Initial deterministic MVP thresholds. Tune only on OpenSec train split."
   containment_min_step: 5
   report_deadline_step: null
+
+ml_calibrator:
+  enabled: false
+  artifact_dir: defender/models/opensec_train_calibrator
+  objective_weight: 0.0
+  containment_advisory_only: true

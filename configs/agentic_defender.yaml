@@ -7,3 +7,9 @@ defender:
 ollama:
   env_base_url: OLLAMA_BASE_URL
   env_model: OLLAMA_MODEL
+
+ml_calibrator:
+  enabled: false
+  artifact_dir: defender/models/opensec_train_calibrator
+  objective_weight: 0.0
+  containment_advisory_only: true

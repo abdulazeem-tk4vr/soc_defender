@@ -27,6 +27,13 @@ agentic = [
   "torch",
   "langgraph",
 ]
+ml = [
+  "sentence-transformers",
+  "xgboost",
+  "hdbscan",
+  "scikit-learn",
+  "joblib",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]

@@ -25,6 +25,7 @@ class DefenderGraphState:
     budget_state: dict[str, Any] = field(default_factory=dict)
     verifier_candidate: dict[str, Any] = field(default_factory=dict)
     gate_decision: dict[str, Any] = field(default_factory=dict)
+    ml_advisory: dict[str, Any] = field(default_factory=dict)
     responder_action: dict[str, Any] = field(default_factory=dict)
     traces: list[DefenderGraphTrace] = field(default_factory=list)
 

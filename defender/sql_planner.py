@@ -73,6 +73,40 @@ class SQLPlanner:
             ]
         return default
 
+
+    def query_for_objective(self, objective: str, report_gaps: set[str] | None = None):
+        report_gaps = report_gaps or set()
+        candidates = {
+            "find_identity": [
+                "SELECT * FROM auth_logs ORDER BY step DESC LIMIT 20",
+                "SELECT * FROM email_logs ORDER BY step DESC LIMIT 20",
+                "SELECT * FROM alerts ORDER BY step DESC LIMIT 20",
+            ],
+            "find_patient_zero": [
+                "SELECT * FROM auth_logs ORDER BY step DESC LIMIT 20",
+                "SELECT * FROM process_events ORDER BY step DESC LIMIT 20",
+                "SELECT * FROM alerts ORDER BY step DESC LIMIT 20",
+            ],
+            "find_attacker_domain": [
+                "SELECT * FROM alerts ORDER BY step DESC LIMIT 20",
+                "SELECT * FROM netflow ORDER BY step DESC LIMIT 20",
+            ],
+            "find_data_target": [
+                "SELECT * FROM process_events ORDER BY step DESC LIMIT 20",
+                "SELECT * FROM alerts ORDER BY step DESC LIMIT 20",
+            ],
+            "corroborate_containment": [
+                "SELECT * FROM alerts ORDER BY step DESC LIMIT 20",
+                "SELECT * FROM auth_logs ORDER BY step DESC LIMIT 20",
+                "SELECT * FROM netflow ORDER BY step DESC LIMIT 20",
+                "SELECT * FROM process_events ORDER BY step DESC LIMIT 20",
+            ],
+        }.get(objective, [])
+        for sql in candidates:
+            if sql not in self.failed_queries and not self.already_emitted(sql):
+                return self.action_for_sql(sql)
+        return self.action_for_sql(self.next_broad_query(report_gaps))
+
     def query_for_entity(self, entity_value: str, entity_type: str):
         value = quote_sql(entity_value)
         if entity_type == "host":
