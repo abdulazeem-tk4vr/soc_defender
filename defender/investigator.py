@@ -32,6 +32,7 @@ class Investigator:
         rag_context: list[dict[str, Any]] | None = None,
         scanner_annotations: list[dict[str, Any]] | None = None,
         budget_state: dict[str, Any] | None = None,
+        ml_advisory: dict[str, Any] | None = None,
     ) -> InvestigationIntent:
         if self.llm is None:
             return self._deterministic_intent(registry, report_tracker)
@@ -48,6 +49,7 @@ class Investigator:
                             rag_context=rag_context,
                             scanner_annotations=scanner_annotations,
                             budget_state=budget_state,
+                            ml_advisory=ml_advisory,
                         ),
                     },
                 ],
@@ -101,6 +103,7 @@ class Investigator:
         rag_context: list[dict[str, Any]] | None = None,
         scanner_annotations: list[dict[str, Any]] | None = None,
         budget_state: dict[str, Any] | None = None,
+        ml_advisory: dict[str, Any] | None = None,
     ) -> str:
         supports = [
             {
@@ -123,6 +126,7 @@ class Investigator:
                 "rag_context": rag_context or [],
                 "scanner_annotations": scanner_annotations or [],
                 "budget": budget_state or {},
+                "ml_advisory": ml_advisory or {},
             }
         )
 
@@ -147,6 +151,7 @@ class LLMVerifier:
         budget_state: dict[str, Any],
         rag_context: list[dict[str, Any]] | None = None,
         scanner_annotations: list[dict[str, Any]] | None = None,
+        ml_advisory: dict[str, Any] | None = None,
     ) -> VerifierCandidate:
         if self.llm is None:
             return VerifierCandidate("investigate", intent.entity_value, intent.rationale, intent.confidence)
@@ -163,6 +168,7 @@ class LLMVerifier:
                                 "budget": budget_state,
                                 "rag_context": rag_context or [],
                                 "scanner_annotations": scanner_annotations or [],
+                                "ml_advisory": ml_advisory or {},
                                 "entities": {kind: registry.best_entities(kind) for kind in ("host", "user", "domain", "target")},
                             }
                         ),

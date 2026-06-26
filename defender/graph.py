@@ -37,6 +37,7 @@ class DefenderGraph:
         self._rag_query_node(state)
         self._rag_node(state)
         self._budget_node(state)
+        self._ml_advisory_node(state)
         self._investigator_node(state)
         self._verifier_node(state)
         action = self._responder_node(state)
@@ -105,6 +106,35 @@ class DefenderGraph:
             },
         )
 
+
+    def _ml_advisory_node(self, state: DefenderGraphState) -> None:
+        calibrator = self.policy.ml_calibrator
+        if calibrator is None:
+            state.ml_advisory = {"available": False, "reason": "disabled"}
+            state.append_trace("ml_advisory", state.ml_advisory)
+            return
+        objective_scores = calibrator.score_objectives(self.policy, state.parsed_observation).to_dict()
+        containment_scores = []
+        for action_type, entity_type in (
+            ("isolate_host", "host"),
+            ("reset_user", "user"),
+            ("block_domain", "domain"),
+        ):
+            for entity_value in self.policy.registry.best_entities(entity_type)[:3]:
+                containment_scores.append(calibrator.score_containment(action_type, entity_value, self.policy).to_dict())
+        state.ml_advisory = {
+            "available": bool(objective_scores.get("available")),
+            "objectives": objective_scores,
+            "containment": containment_scores,
+            "artifact": {
+                "example_count": calibrator.manifest.get("example_count"),
+                "training_status": calibrator.manifest.get("training_status"),
+            },
+        }
+        self.policy.last_ml_objective_scores = objective_scores
+        self.policy.last_ml_containment_scores = containment_scores
+        state.append_trace("ml_advisory", state.ml_advisory)
+
     def _investigator_node(self, state: DefenderGraphState) -> None:
         intent = self.investigator.investigate(
             state.observation,
@@ -113,12 +143,10 @@ class DefenderGraph:
             rag_context=state.rag_context,
             scanner_annotations=state.scanner_annotations,
             budget_state=state.budget_state,
+            ml_advisory=state.ml_advisory,
         )
         state.investigation_intent = asdict(intent)
         state.append_trace("investigator", state.investigation_intent)
-        if self.policy.last_ml_objective_scores:
-            state.ml_advisory["objectives"] = dict(self.policy.last_ml_objective_scores)
-            state.append_trace("ml_objectives", state.ml_advisory["objectives"])
 
     def _budget_node(self, state: DefenderGraphState) -> None:
         deadline = self.policy._report_deadline_step()
@@ -139,6 +167,7 @@ class DefenderGraph:
             state.budget_state,
             rag_context=state.rag_context,
             scanner_annotations=state.scanner_annotations,
+            ml_advisory=state.ml_advisory,
         )
         state.verifier_candidate = asdict(candidate)
         state.append_trace("verifier", state.verifier_candidate)
@@ -152,8 +181,6 @@ class DefenderGraph:
         payload = action_payload(action)
         state.responder_action = payload
         state.gate_decision = verified_candidate_payload(verified).get("gate_decision") or {}
-        if self.policy.last_ml_containment_scores:
-            state.ml_advisory["containment"] = list(self.policy.last_ml_containment_scores)
         state.append_trace(
             "responder",
             {

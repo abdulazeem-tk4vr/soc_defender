@@ -122,3 +122,38 @@ def test_ollama_llm_logs_repaired_json(monkeypatch, tmp_path):
     assert len(records) == 1
     assert records[0]["raw_text"] == '{"action_type":"investigate"}'
     assert records[0]["error"] is None
+
+
+
+def test_ml_advisory_reaches_investigator_prompt():
+    llm = StaticJSONLLMClient({"intent_type": "query_logs"})
+    investigator = Investigator(llm)
+
+    investigator.investigate(
+        {"step_index": 2},
+        EvidenceRegistry(),
+        ReportReadinessTracker(),
+        ml_advisory={"objectives": {"selected": "find_data_target"}},
+    )
+
+    prompt = llm.traces[0].messages[1]["content"]
+    assert "ml_advisory" in prompt
+    assert "find_data_target" in prompt
+
+
+def test_ml_advisory_reaches_verifier_prompt():
+    llm = StaticJSONLLMClient({"action_type": "investigate"})
+    verifier = LLMVerifier(llm)
+    intent = Investigator().investigate({}, EvidenceRegistry(), ReportReadinessTracker())
+
+    verifier.candidate(
+        intent,
+        EvidenceRegistry(),
+        ReportReadinessTracker(),
+        {"step_index": 2},
+        ml_advisory={"containment": [{"entity_value": "h-001", "score": 0.2}]},
+    )
+
+    prompt = llm.traces[0].messages[1]["content"]
+    assert "ml_advisory" in prompt
+    assert "h-001" in prompt

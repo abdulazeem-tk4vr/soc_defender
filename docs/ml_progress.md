@@ -38,6 +38,9 @@ Verification so far:
 - Training script now emits timestamped progress logs for examples, embedding cache, embedding, IsolationForest, HDBSCAN, XGBoost, and artifact writes.
 - Eval CLI now supports `--ml-calibrator` and `--ml-artifact-dir`.
 - ML-enabled one-seed train eval smoke passed: `evidence_gate_only+ml`, reward `2.30`, containment attempted.
+- Full-agentic graph now injects ML advisory context before LLM investigator/verifier nodes.
+- Investigator LLM prompt receives ML objective scores; verifier LLM prompt receives ML containment sufficiency context.
+- Full-agentic one-seed ML smoke passed: `full_agentic+ml`, reward `2.30`, trained artifact attached in output, and `ml_advisory` appears in graph traces.
 
 ## Objective
 
@@ -346,7 +349,7 @@ Acceptance checks:
 
 ## Phase 5: Investigation Planner Integration
 
-Status: initial objective-to-SQL integration implemented behind ML availability
+Status: implemented for deterministic planner and full-agentic LLM advisory context
 
 Goal: use ML objective scores to reduce repeated broad queries and prioritize evidence sources for missing report fields.
 

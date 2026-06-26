@@ -270,6 +270,8 @@ Validation:
 - `scripts/train_ml_calibrator.py` now emits timestamped progress logs across examples, embedding cache, embedding, unsupervised fitting, XGBoost, and artifact writes.
 - Eval CLI supports `--ml-calibrator` / `--ml-artifact-dir`, and the standard tier alias now includes manifest entries marked `standard`.
 - One-seed train smoke with `evidence_gate_only+ml` passed with reward `2.30` and containment attempted.
+- Full-agentic graph now injects ML advisory context before LLM investigator/verifier nodes. Investigator prompts receive ML objective scores; verifier prompts receive ML containment sufficiency context.
+- One-seed train smoke with `full_agentic+ml --agent-llm none` passed with reward `2.30`; output includes trained artifact metadata and `ml_advisory` graph traces.
 
 Partially implemented or notable limitations:
 

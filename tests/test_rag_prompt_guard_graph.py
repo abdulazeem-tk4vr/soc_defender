@@ -83,6 +83,7 @@ def test_graph_returns_action_and_audit_traces():
         "rag_query",
         "rag",
         "budget",
+        "ml_advisory",
         "investigator",
         "verifier",
         "responder",
@@ -278,3 +279,44 @@ def test_graph_uses_llm_planned_rag_query_for_retrieval():
     assert retriever.queries == ["attacker domain netflow evidence"]
     assert state.rag_query == "attacker domain netflow evidence"
     assert any(trace.node == "rag_query" and trace.output_summary["source"] == "llm" for trace in state.traces)
+
+
+
+class FakeMLCalibrator:
+    manifest = {"example_count": 1, "training_status": {"xgboost": "trained"}}
+
+    def score_objectives(self, policy, parsed=None):
+        from defender.ml_calibrator import ObjectiveScores
+
+        return ObjectiveScores(True, {"find_data_target": 0.9}, "find_data_target", "test")
+
+    def score_containment(self, action_type, entity_value, policy):
+        from defender.ml_calibrator import ContainmentScore
+
+        return ContainmentScore(True, action_type, entity_value, score=0.4, label="insufficient_evidence", reason="test")
+
+
+def test_full_agentic_graph_traces_ml_advisory():
+    investigator_llm = StaticJSONLLMClient({"intent_type": "query_logs"})
+    verifier_llm = StaticJSONLLMClient({"action_type": "investigate"})
+    policy = DefenderPolicy(max_steps=15, ml_calibrator=FakeMLCalibrator())
+    graph = DefenderGraph(
+        policy=policy,
+        investigator=Investigator(investigator_llm),
+        verifier=LLMVerifier(verifier_llm),
+    )
+
+    _, state = graph.next_action(
+        {
+            "scenario_id": "s-ml",
+            "step_index": 2,
+            "new_alerts": [],
+            "containment": {},
+            "last_action_result": {"ok": True, "message": "reset", "data": {}},
+        }
+    )
+
+    assert any(trace.node == "ml_advisory" for trace in state.traces)
+    assert state.ml_advisory["objectives"]["selected"] == "find_data_target"
+    assert "find_data_target" in investigator_llm.traces[0].messages[1]["content"]
+    assert "ml_advisory" in verifier_llm.traces[0].messages[1]["content"]
