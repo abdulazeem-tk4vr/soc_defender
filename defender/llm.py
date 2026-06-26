@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Protocol
 
 import requests
@@ -59,12 +61,18 @@ class OllamaLLMClient:
             repaired_text = self._complete_text(repair_prompt)
             try:
                 parsed = extract_json_object(repaired_text)
-                self.traces.append(LLMTrace("ollama", raw_text=repaired_text, parsed=parsed, messages=messages, schema_hint=schema_hint))
+                trace = LLMTrace("ollama", raw_text=repaired_text, parsed=parsed, messages=messages, schema_hint=schema_hint)
+                self.traces.append(trace)
+                self._append_log(trace)
                 return parsed
             except Exception as second_error:
-                self.traces.append(LLMTrace("ollama", raw_text=repaired_text, error=str(second_error), messages=messages, schema_hint=schema_hint))
+                trace = LLMTrace("ollama", raw_text=repaired_text, error=str(second_error), messages=messages, schema_hint=schema_hint)
+                self.traces.append(trace)
+                self._append_log(trace)
                 raise
-        self.traces.append(LLMTrace("ollama", raw_text=text, parsed=parsed, messages=messages, schema_hint=schema_hint))
+        trace = LLMTrace("ollama", raw_text=text, parsed=parsed, messages=messages, schema_hint=schema_hint)
+        self.traces.append(trace)
+        self._append_log(trace)
         return parsed
 
     def _complete_text(self, prompt: str) -> str:
@@ -89,6 +97,26 @@ class OllamaLLMClient:
             parts.append("Return only JSON matching this shape:")
             parts.append(json.dumps(schema_hint, indent=2))
         return "\n\n".join(parts)
+
+    def _append_log(self, trace: LLMTrace) -> None:
+        path = os.getenv("SOC_DEFENDER_LLM_LOG")
+        if not path:
+            return
+        record = {
+            "ts": time.time(),
+            "backend": trace.backend,
+            "model": self.config.model,
+            "base_url": self.config.base_url,
+            "raw_text": trace.raw_text,
+            "parsed": trace.parsed,
+            "error": trace.error,
+            "schema_hint": trace.schema_hint,
+            "messages": trace.messages,
+        }
+        log_path = Path(path)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
 
 
 @dataclass
