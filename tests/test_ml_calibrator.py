@@ -113,3 +113,31 @@ def test_policy_uses_available_ml_objective_for_investigation_query():
 
     assert action.action_type == "query_logs"
     assert action.params["sql"] == "SELECT * FROM process_events ORDER BY step DESC LIMIT 20"
+
+
+class CorroborateOnlyCalibrator:
+    def score_objectives(self, state, parsed=None):
+        return ObjectiveScores(True, {"corroborate_containment": 0.99}, "corroborate_containment", "test")
+
+    def score_containment(self, action_type, entity_value, state):
+        raise AssertionError("not expected")
+
+
+def test_policy_pivots_ml_corroboration_to_missing_attacker_domain():
+    from defender.policy import DefenderPolicy
+
+    policy = DefenderPolicy(ml_calibrator=CorroborateOnlyCalibrator())
+    policy.report_tracker.values.update(
+        {
+            "patient_zero_host": "h-1",
+            "compromised_user": "u-1",
+            "attacker_domain": "unknown",
+            "data_target": "unknown",
+            "initial_vector": "phish",
+        }
+    )
+
+    action = policy._investigate(type("Parsed", (), {"step_index": 8})())
+
+    assert action.action_type == "query_logs"
+    assert action.params["sql"] == "SELECT * FROM netflow ORDER BY step DESC LIMIT 20"

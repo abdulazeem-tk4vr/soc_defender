@@ -17,6 +17,9 @@ def test_static_llm_drives_investigator_contract():
                 "intent_type": "query_logs",
                 "entity_type": "host",
                 "entity_value": "h-001",
+                "objective": "find_data_target",
+                "source_table": "process_events",
+                "sql": "SELECT * FROM process_events ORDER BY step DESC LIMIT 20",
                 "rationale": "check process events",
                 "confidence": 0.7,
             }
@@ -27,6 +30,9 @@ def test_static_llm_drives_investigator_contract():
 
     assert intent.intent_type == "query_logs"
     assert intent.entity_value == "h-001"
+    assert intent.objective == "find_data_target"
+    assert intent.source_table == "process_events"
+    assert intent.sql == "SELECT * FROM process_events ORDER BY step DESC LIMIT 20"
     assert intent.confidence == 0.7
 
 
@@ -157,3 +163,24 @@ def test_ml_advisory_reaches_verifier_prompt():
     prompt = llm.traces[0].messages[1]["content"]
     assert "ml_advisory" in prompt
     assert "h-001" in prompt
+
+
+def test_verifier_rejects_submit_report_with_critical_fields_missing():
+    llm = StaticJSONLLMClient({"action_type": "submit_report", "confidence": 0.9})
+    verifier = LLMVerifier(llm)
+    tracker = ReportReadinessTracker()
+    tracker.values.update(
+        {
+            "patient_zero_host": "h-1",
+            "compromised_user": "u-1",
+            "attacker_domain": "unknown",
+            "data_target": "unknown",
+            "initial_vector": "phish",
+        }
+    )
+    intent = Investigator().investigate({}, EvidenceRegistry(), tracker)
+
+    candidate = verifier.candidate(intent, EvidenceRegistry(), tracker, {"step_index": 10})
+
+    assert candidate.action_type == "investigate"
+    assert "critical report fields" in candidate.rationale

@@ -3,7 +3,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from .actions import block_domain, fetch_alert, fetch_email, isolate_host, reset_user, submit_report
+from .actions import block_domain, fetch_alert, fetch_email, isolate_host, reset_user, submit_report, is_safe_select
+from .prompt_context import report_gaps
 from .investigator import InvestigationIntent, VerifierCandidate
 from .observation import ParsedObservation
 from .policy import DefenderPolicy
@@ -56,12 +57,15 @@ class Responder:
                 return containment, verified
 
         action = self._action_from_intent(parsed, intent)
-        if action is not None:
+        if action is not None and intent.intent_type == "query_logs":
             return action, verified
 
         unseen = self.policy._next_unseen_fetch(parsed)
         if unseen is not None:
             return unseen, verified
+
+        if action is not None:
+            return action, verified
 
         return self.policy._investigate(parsed), verified
 
@@ -105,6 +109,12 @@ class Responder:
             if email_id:
                 self.policy.fetched_emails.add(email_id)
                 return fetch_email(email_id)
+        if intent.intent_type == "query_logs" and intent.sql and is_safe_select(intent.sql):
+            return self.policy.sql_planner.action_for_sql(intent.sql)
+        if intent.intent_type == "query_logs" and (intent.source_table or intent.objective):
+            gaps = set(report_gaps(self.policy.report_tracker.values))
+            objective = self.policy._progress_guarded_objective(intent.objective, gaps)
+            return self.policy.sql_planner.query_for_objective_source(objective, intent.source_table, gaps)
         if intent.intent_type == "query_logs" and intent.entity_value:
             return self.policy.sql_planner.query_for_entity(intent.entity_value, intent.entity_type or "")
         return None

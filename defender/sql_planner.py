@@ -74,6 +74,45 @@ class SQLPlanner:
         return default
 
 
+
+    def query_for_source_table(self, source_table: str):
+        candidates = {
+            "alerts": "SELECT * FROM alerts ORDER BY step DESC LIMIT 20",
+            "auth_logs": "SELECT * FROM auth_logs ORDER BY step DESC LIMIT 20",
+            "email_logs": "SELECT * FROM email_logs ORDER BY step DESC LIMIT 20",
+            "netflow": "SELECT * FROM netflow ORDER BY step DESC LIMIT 20",
+            "process_events": "SELECT * FROM process_events ORDER BY step DESC LIMIT 20",
+        }
+        sql = candidates.get(source_table)
+        if sql is None:
+            return self.action_for_sql(self.next_broad_query())
+        return self.action_for_sql(sql)
+
+    def query_for_objective_source(self, objective: str | None, source_table: str | None, report_gaps: set[str] | None = None):
+        report_gaps = report_gaps or set()
+        ordered_sources = {
+            "find_identity": ["auth_logs", "email_logs", "alerts"],
+            "find_patient_zero": ["auth_logs", "alerts", "process_events"],
+            "find_attacker_domain": ["netflow", "alerts", "process_events"],
+            "find_data_target": ["process_events", "alerts"],
+            "corroborate_containment": ["alerts", "auth_logs", "netflow", "process_events"],
+        }.get(objective or "", [])
+        sources = []
+        if source_table:
+            sources.append(source_table)
+        sources.extend(source for source in ordered_sources if source not in sources)
+        for source in sources:
+            sql = {
+                "alerts": "SELECT * FROM alerts ORDER BY step DESC LIMIT 20",
+                "auth_logs": "SELECT * FROM auth_logs ORDER BY step DESC LIMIT 20",
+                "email_logs": "SELECT * FROM email_logs ORDER BY step DESC LIMIT 20",
+                "netflow": "SELECT * FROM netflow ORDER BY step DESC LIMIT 20",
+                "process_events": "SELECT * FROM process_events ORDER BY step DESC LIMIT 20",
+            }.get(source)
+            if sql and sql not in self.failed_queries and not self.already_emitted(sql):
+                return self.action_for_sql(sql)
+        return self.action_for_sql(self.next_broad_query(report_gaps))
+
     def query_for_objective(self, objective: str, report_gaps: set[str] | None = None):
         report_gaps = report_gaps or set()
         candidates = {
@@ -88,8 +127,8 @@ class SQLPlanner:
                 "SELECT * FROM alerts ORDER BY step DESC LIMIT 20",
             ],
             "find_attacker_domain": [
-                "SELECT * FROM alerts ORDER BY step DESC LIMIT 20",
                 "SELECT * FROM netflow ORDER BY step DESC LIMIT 20",
+                "SELECT * FROM alerts ORDER BY step DESC LIMIT 20",
             ],
             "find_data_target": [
                 "SELECT * FROM process_events ORDER BY step DESC LIMIT 20",

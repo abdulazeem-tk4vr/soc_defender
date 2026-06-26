@@ -6,6 +6,7 @@ from typing import Any
 
 from .evidence_registry import EvidenceRegistry
 from .llm import LLMClient
+from .prompt_context import report_focus
 from .report_readiness import ReportReadinessTracker
 
 
@@ -14,6 +15,9 @@ class InvestigationIntent:
     intent_type: str
     entity_type: str | None = None
     entity_value: str | None = None
+    objective: str | None = None
+    source_table: str | None = None
+    sql: str | None = None
     rationale: str = ""
     confidence: float = 0.0
     evidence_summary: str = ""
@@ -57,6 +61,9 @@ class Investigator:
                     "intent_type": "query_logs|fetch_alert|fetch_email|wait",
                     "entity_type": "host|user|domain|target|null",
                     "entity_value": "string|null",
+                    "objective": "find_identity|find_patient_zero|find_attacker_domain|find_data_target|corroborate_containment|submit_report|null",
+                    "source_table": "auth_logs|alerts|netflow|process_events|email_logs|null",
+                    "sql": "safe SELECT string|null",
                     "rationale": "string",
                     "confidence": 0.0,
                     "evidence_summary": "string",
@@ -75,10 +82,20 @@ class Investigator:
         entity_type = response.get("entity_type")
         if entity_type not in {"host", "user", "domain", "target", None}:
             entity_type = None
+        objective = response.get("objective")
+        if objective not in {"find_identity", "find_patient_zero", "find_attacker_domain", "find_data_target", "corroborate_containment", "submit_report", None}:
+            objective = None
+        source_table = response.get("source_table")
+        if source_table not in {"auth_logs", "alerts", "netflow", "process_events", "email_logs", None}:
+            source_table = None
+        sql = response.get("sql")
         return InvestigationIntent(
             intent_type=intent_type,
             entity_type=entity_type,
             entity_value=response.get("entity_value"),
+            objective=objective,
+            source_table=source_table,
+            sql=str(sql) if sql else None,
             rationale=str(response.get("rationale") or ""),
             confidence=max(0.0, min(1.0, float(response.get("confidence") or 0.0))),
             evidence_summary=str(response.get("evidence_summary") or ""),
@@ -89,11 +106,11 @@ class Investigator:
     def _deterministic_intent(registry: EvidenceRegistry, report_tracker: ReportReadinessTracker) -> InvestigationIntent:
         if report_tracker.values.get("data_target") == "unknown":
             for host in registry.best_entities("host"):
-                return InvestigationIntent("query_logs", "host", host, "Find process/data access evidence.", 0.5)
+                return InvestigationIntent("query_logs", entity_type="host", entity_value=host, objective="find_data_target", source_table="process_events", rationale="Find process/data access evidence.", confidence=0.5)
         if report_tracker.values.get("attacker_domain") == "unknown":
             for domain in registry.best_entities("domain"):
-                return InvestigationIntent("query_logs", "domain", domain, "Corroborate external domain evidence.", 0.5)
-        return InvestigationIntent("query_logs", None, None, "Continue broad evidence collection.", 0.3)
+                return InvestigationIntent("query_logs", entity_type="domain", entity_value=domain, objective="find_attacker_domain", source_table="alerts", rationale="Corroborate external domain evidence.", confidence=0.5)
+        return InvestigationIntent("query_logs", rationale="Continue broad evidence collection.", confidence=0.3)
 
     @staticmethod
     def _state_summary(
@@ -122,6 +139,7 @@ class Investigator:
                 "new_alerts": observation.get("new_alerts"),
                 "new_emails": observation.get("new_emails"),
                 "report_values": report_tracker.values,
+                "focus": report_focus(report_tracker.values),
                 "recent_support": supports,
                 "rag_context": rag_context or [],
                 "scanner_annotations": scanner_annotations or [],
@@ -176,9 +194,27 @@ class LLMVerifier:
                 ],
                 schema_hint={"action_type": "investigate|isolate_host|block_domain|reset_user|submit_report", "entity_value": "string|null", "rationale": "string", "confidence": 0.0},
             )
-            return self._candidate_from_response(response)
+            return self._progress_guard(self._candidate_from_response(response), intent, report_tracker)
         except Exception:
-            return VerifierCandidate("investigate", intent.entity_value, intent.rationale, intent.confidence)
+            return self._progress_guard(VerifierCandidate("investigate", intent.entity_value, intent.rationale, intent.confidence), intent, report_tracker)
+
+    @staticmethod
+    def _progress_guard(candidate: VerifierCandidate, intent: InvestigationIntent, report_tracker: ReportReadinessTracker) -> VerifierCandidate:
+        critical_missing = [
+            field
+            for field in ("attacker_domain", "data_target")
+            if report_tracker.values.get(field) == "unknown"
+        ]
+        if not critical_missing:
+            return candidate
+        if candidate.action_type == "submit_report" or intent.objective in {"corroborate_containment", "submit_report"}:
+            return VerifierCandidate(
+                "investigate",
+                intent.entity_value,
+                "critical report fields still missing: " + ",".join(critical_missing),
+                min(candidate.confidence, intent.confidence),
+            )
+        return candidate
 
     @staticmethod
     def _candidate_from_response(response: dict[str, Any]) -> VerifierCandidate:

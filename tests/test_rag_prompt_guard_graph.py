@@ -247,6 +247,20 @@ def test_rag_query_planner_rejects_instruction_like_query():
     assert "ignore previous" not in plan.query
 
 
+def test_rag_query_planner_reuses_cached_query_on_unchanged_state():
+    llm = StaticJSONLLMClient({"query": "phishing exfiltration identify attacker domain from netflow", "rationale": "domain gap"})
+    policy = DefenderPolicy()
+    planner = RAGQueryPlanner(llm)
+
+    first = planner.plan({"step_index": 3, "attacker_state": "exfil"}, policy.registry, policy.report_tracker)
+    second = planner.plan({"step_index": 4, "attacker_state": "exfil"}, policy.registry, policy.report_tracker)
+
+    assert first.source == "llm"
+    assert second.source == "cached"
+    assert second.query == first.query
+    assert len(llm.traces) == 1
+
+
 def test_graph_uses_llm_planned_rag_query_for_retrieval():
     class CapturingRetriever(LocalKeywordRAGRetriever):
         def __init__(self):
@@ -320,3 +334,34 @@ def test_full_agentic_graph_traces_ml_advisory():
     assert state.ml_advisory["objectives"]["selected"] == "find_data_target"
     assert "find_data_target" in investigator_llm.traces[0].messages[1]["content"]
     assert "ml_advisory" in verifier_llm.traces[0].messages[1]["content"]
+
+
+
+def test_responder_honors_source_table_intent():
+    graph = DefenderGraph(
+        policy=DefenderPolicy(max_steps=15),
+        investigator=Investigator(
+            StaticJSONLLMClient(
+                {
+                    "intent_type": "query_logs",
+                    "objective": "find_data_target",
+                    "source_table": "process_events",
+                    "confidence": 0.9,
+                }
+            )
+        ),
+        verifier=LLMVerifier(StaticJSONLLMClient({"action_type": "investigate"})),
+    )
+
+    action, _ = graph.next_action(
+        {
+            "scenario_id": "s-source",
+            "step_index": 2,
+            "new_alerts": [],
+            "containment": {},
+            "last_action_result": {"ok": True, "message": "reset", "data": {}},
+        }
+    )
+
+    assert action["action_type"] == "query_logs"
+    assert action["params"]["sql"] == "SELECT * FROM process_events ORDER BY step DESC LIMIT 20"

@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from .evidence_registry import EvidenceRegistry
 from .llm import LLMClient
+from .prompt_context import gap_terms, report_focus, report_gaps
 from .report_readiness import ReportReadinessTracker
 
 MAX_RAG_QUERY_CHARS = 300
@@ -29,6 +30,8 @@ class RAGQueryPlan:
 @dataclass
 class RAGQueryPlanner:
     llm: LLMClient | None = None
+    _last_signature: str = field(default="", init=False, repr=False)
+    _last_plan: RAGQueryPlan | None = field(default=None, init=False, repr=False)
 
     def plan(
         self,
@@ -36,9 +39,16 @@ class RAGQueryPlanner:
         registry: EvidenceRegistry,
         report_tracker: ReportReadinessTracker,
     ) -> RAGQueryPlan:
+        signature = self._planning_signature(observation, registry, report_tracker)
+        if self._last_plan is not None and signature == self._last_signature:
+            return RAGQueryPlan(self._last_plan.query, source="cached", rationale=self._last_plan.rationale)
+
         fallback = self._deterministic_query(observation, registry, report_tracker)
         if self.llm is None:
-            return RAGQueryPlan(fallback, source="deterministic", rationale="no llm configured")
+            plan = RAGQueryPlan(fallback, source="deterministic", rationale="no llm configured")
+            self._last_signature = signature
+            self._last_plan = plan
+            return plan
         try:
             response = self.llm.complete_json(
                 [
@@ -56,10 +66,19 @@ class RAGQueryPlanner:
             )
             query = self._clean_query(str(response.get("query") or ""))
             if not query:
-                return RAGQueryPlan(fallback, source="deterministic", rationale="llm query rejected")
-            return RAGQueryPlan(query, source="llm", rationale=str(response.get("rationale") or ""))
+                plan = RAGQueryPlan(fallback, source="deterministic", rationale="llm query rejected")
+                self._last_signature = signature
+                self._last_plan = plan
+                return plan
+            plan = RAGQueryPlan(query, source="llm", rationale=str(response.get("rationale") or ""))
+            self._last_signature = signature
+            self._last_plan = plan
+            return plan
         except Exception:
-            return RAGQueryPlan(fallback, source="deterministic", rationale="llm query failed")
+            plan = RAGQueryPlan(fallback, source="deterministic", rationale="llm query failed")
+            self._last_signature = signature
+            self._last_plan = plan
+            return plan
 
     @staticmethod
     def _deterministic_query(
@@ -67,14 +86,14 @@ class RAGQueryPlanner:
         registry: EvidenceRegistry,
         report_tracker: ReportReadinessTracker,
     ) -> str:
-        gaps = [key for key, value in report_tracker.values.items() if value == "unknown"]
+        gaps = report_gaps(report_tracker.values)
         entities = []
         for kind in ("host", "user", "domain", "target"):
             entities.extend(registry.best_entities(kind)[:2])
         parts = [
             "soc incident response evidence",
             str(observation.get("attacker_state") or "investigation"),
-            _gap_terms(gaps),
+            gap_terms(gaps),
             " ".join(entities),
         ]
         return RAGQueryPlanner._clean_query(" ".join(part for part in parts if part)) or "soc incident response evidence phishing exfiltration containment"
@@ -102,9 +121,27 @@ class RAGQueryPlanner:
                 "step_index": observation.get("step_index"),
                 "attacker_state": observation.get("attacker_state"),
                 "report_values": report_tracker.values,
-                "unknown_report_fields": [key for key, value in report_tracker.values.items() if value == "unknown"],
+                "focus": report_focus(report_tracker.values),
                 "known_entities": {kind: registry.best_entities(kind)[:5] for kind in ("host", "user", "domain", "target")},
                 "ranked_supports": supports,
+            },
+            sort_keys=True,
+        )
+
+    def _planning_signature(
+        self,
+        observation: dict[str, Any],
+        registry: EvidenceRegistry,
+        report_tracker: ReportReadinessTracker,
+    ) -> str:
+        return json.dumps(
+            {
+                "attacker_state": observation.get("attacker_state"),
+                "focus": report_focus(report_tracker.values),
+                "support_count": len(registry.supports),
+                "content_count": len(registry.content_ids),
+                "seen_count": len(registry.seen_ids),
+                "known_entities": {kind: registry.best_entities(kind)[:3] for kind in ("host", "user", "domain", "target")},
             },
             sort_keys=True,
         )
@@ -121,17 +158,3 @@ class RAGQueryPlanner:
             return ""
         return query[:MAX_RAG_QUERY_CHARS].strip()
 
-
-def _gap_terms(gaps: list[str]) -> str:
-    terms = []
-    if "attacker_domain" in gaps:
-        terms.append("identify attacker domain phishing email headers netflow dst_domain exfiltration")
-    if "data_target" in gaps:
-        terms.append("identify data target staging exfiltration process_events file access")
-    if "patient_zero_host" in gaps:
-        terms.append("identify patient zero host credential theft authentication alerts")
-    if "compromised_user" in gaps:
-        terms.append("identify compromised user phishing credential reuse authentication")
-    if not terms:
-        terms.append("containment evidence isolate host reset user block domain")
-    return " ".join(terms)

@@ -353,6 +353,7 @@ def main() -> int:
     parser.add_argument("--use-langgraph", action="store_true", help="Run full_agentic through the optional LangGraph adapter")
     parser.add_argument("--ml-calibrator", action="store_true", help="Enable train-only ML calibrator artifacts for local defender modes")
     parser.add_argument("--ml-artifact-dir", default=str(ROOT / "defender" / "models" / "opensec_train_calibrator"))
+    parser.add_argument("--llm-log", default="", help="Optional JSONL path for internal LLM raw/parsed traces")
     parser.add_argument(
         "--prompt-guard2-model",
         default="none",
@@ -374,6 +375,12 @@ def main() -> int:
         os.environ["OLLAMA_BASE_URL"] = args.base_url
     if args.ollama_model:
         os.environ["OLLAMA_MODEL"] = args.ollama_model
+    if args.llm_log:
+        llm_log_path = Path(args.llm_log)
+        if not llm_log_path.is_absolute():
+            llm_log_path = ROOT / llm_log_path
+        llm_log_path.parent.mkdir(parents=True, exist_ok=True)
+        os.environ["SOC_DEFENDER_LLM_LOG"] = str(llm_log_path)
     if args.no_rag:
         args.rag_path = ""
     elif not args.rag_path and (ROOT / "data" / "rag" / "qdrant" / "build_manifest.json").exists():

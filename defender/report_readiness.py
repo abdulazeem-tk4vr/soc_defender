@@ -22,8 +22,18 @@ class ReportReadinessTracker:
     def update(self, registry: EvidenceRegistry) -> None:
         host = self._first_with_indicator(registry, "host", {"credential", "creds", "phish", "alert", "exfil"})
         user = self._first_with_indicator(registry, "user", {"credential", "creds", "phish", "alert", "exfil"})
-        domain = self._first_with_indicator(registry, "domain", {"exfil", "phish", "alert"})
-        target = self._first_with_indicator(registry, "target", {"exfil", "staging", "alert"})
+        domain = self._first_by_source_or_indicator(
+            registry,
+            "domain",
+            preferred_sources={"alerts", "netflow"},
+            preferred_indicators={"exfil", "alert"},
+        )
+        target = self._first_by_source_or_indicator(
+            registry,
+            "target",
+            preferred_sources={"process_events"},
+            preferred_indicators={"target", "stage", "exfil", "alert"},
+        )
         if host:
             self.values["patient_zero_host"] = host
         if user:
@@ -52,5 +62,22 @@ class ReportReadinessTracker:
             if fallback is None:
                 fallback = support.entity_value
             if preferred.intersection(support.malicious_indicators):
+                return support.entity_value
+        return fallback
+
+    @staticmethod
+    def _first_by_source_or_indicator(
+        registry: EvidenceRegistry,
+        entity_type: str,
+        preferred_sources: set[str],
+        preferred_indicators: set[str],
+    ) -> str | None:
+        fallback = None
+        for support in registry.ranked_supports(entity_type):
+            if fallback is None:
+                fallback = support.entity_value
+            if support.source_table in preferred_sources and preferred_indicators.intersection(support.malicious_indicators):
+                return support.entity_value
+            if support.source_table in preferred_sources and entity_type == "target":
                 return support.entity_value
         return fallback

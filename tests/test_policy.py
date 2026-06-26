@@ -77,3 +77,15 @@ def test_gated_containment_skips_untracked_suspicious_entities():
     )
 
     assert policy._next_gated_containment(5, {"isolated_hosts": [], "blocked_domains": [], "reset_users": []}) is None
+
+
+
+def test_sql_planner_query_for_objective_source_avoids_repeats():
+    from defender.sql_planner import SQLPlanner
+
+    planner = SQLPlanner()
+    first = planner.query_for_objective_source("find_data_target", "process_events")
+    second = planner.query_for_objective_source("find_data_target", "process_events")
+
+    assert first.params["sql"] == "SELECT * FROM process_events ORDER BY step DESC LIMIT 20"
+    assert second.params["sql"] == "SELECT * FROM alerts ORDER BY step DESC LIMIT 20"

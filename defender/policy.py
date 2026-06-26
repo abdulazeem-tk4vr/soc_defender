@@ -7,6 +7,7 @@ from .actions import block_domain, fetch_alert, fetch_email, isolate_host, reset
 from .evidence_registry import EvidenceRegistry
 from .ml_calibrator import MLCalibrator
 from .observation import ParsedObservation, parse_observation
+from .prompt_context import report_gaps
 from .report_readiness import ReportReadinessTracker
 from .sql_planner import SQLPlanner
 from .verifier import gate_containment
@@ -133,19 +134,20 @@ class DefenderPolicy:
         return None
 
     def _investigate(self, parsed):
-        report_gaps = {key for key, value in self.report_tracker.values.items() if value == "unknown"}
+        gaps = set(report_gaps(self.report_tracker.values))
         if self.ml_calibrator is not None:
             self.last_ml_objective_scores = self.ml_calibrator.score_objectives(self, parsed).to_dict()
         else:
             self.last_ml_objective_scores = {}
         ml_objective = self.last_ml_objective_scores.get("selected")
+        ml_objective = self._progress_guarded_objective(str(ml_objective) if ml_objective else None, gaps)
         if self.last_ml_objective_scores.get("available") and ml_objective:
-            return self.sql_planner.query_for_objective(str(ml_objective), report_gaps)
+            return self.sql_planner.query_for_objective(str(ml_objective), gaps)
 
-        if "attacker_domain" in report_gaps and not self.registry.best_entities("domain"):
-            return self.sql_planner.action_for_sql(self.sql_planner.next_broad_query(report_gaps))
-        if "data_target" in report_gaps and not self.registry.best_entities("target"):
-            return self.sql_planner.action_for_sql(self.sql_planner.next_broad_query(report_gaps))
+        if "attacker_domain" in gaps and not self.registry.best_entities("domain"):
+            return self.sql_planner.action_for_sql(self.sql_planner.next_broad_query(gaps))
+        if "data_target" in gaps and not self.registry.best_entities("target"):
+            return self.sql_planner.action_for_sql(self.sql_planner.next_broad_query(gaps))
 
         for entity_type in ("domain", "target", "host", "user"):
             for entity_value in self.registry.best_entities(entity_type):
@@ -154,7 +156,17 @@ class DefenderPolicy:
                 action = self.sql_planner.query_for_entity(entity_value, entity_type)
                 if action.params["sql"] not in self.sql_planner.failed_queries:
                     return action
-        return self.sql_planner.action_for_sql(self.sql_planner.next_broad_query(report_gaps))
+        return self.sql_planner.action_for_sql(self.sql_planner.next_broad_query(gaps))
+
+    @staticmethod
+    def _progress_guarded_objective(objective: str | None, gaps: set[str]) -> str | None:
+        if objective not in {"corroborate_containment", "submit_report"}:
+            return objective
+        if "attacker_domain" in gaps:
+            return "find_attacker_domain"
+        if "data_target" in gaps:
+            return "find_data_target"
+        return objective
 
     def _record_failed_query(self, parsed) -> None:
         result = parsed.last_action_result or {}
