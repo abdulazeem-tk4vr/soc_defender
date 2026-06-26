@@ -68,7 +68,9 @@ def test_artifact_calibrator_uses_label_priors_and_heuristic_selection(tmp_path)
         encoding="utf-8",
     )
 
-    calibrator = load_ml_calibrator(MLCalibratorConfig(enabled=True, artifact_dir=str(artifact_dir)))
+    calibrator = load_ml_calibrator(
+        MLCalibratorConfig(enabled=True, artifact_dir=str(artifact_dir), objective_enabled=True)
+    )
     agent = build_agent(mode="evidence_gate_only", max_steps=15)
     agent.policy.report_tracker.values.update(
         {
@@ -85,6 +87,27 @@ def test_artifact_calibrator_uses_label_priors_and_heuristic_selection(tmp_path)
     assert scores.available is True
     assert scores.selected == "find_data_target"
     assert scores.reason == "label_priors"
+
+
+def test_artifact_calibrator_disables_objective_scoring_by_default(tmp_path):
+    artifact_dir = tmp_path / "artifacts"
+    artifact_dir.mkdir()
+    schema = feature_schema()
+    (artifact_dir / "manifest.json").write_text(
+        json.dumps({"source_split": "train", "feature_schema_hash": feature_schema_hash(schema)}),
+        encoding="utf-8",
+    )
+    (artifact_dir / "feature_schema.json").write_text(json.dumps(schema), encoding="utf-8")
+    (artifact_dir / "label_schema.json").write_text(
+        json.dumps({"objective_priors": {"find_data_target": 0.8}}),
+        encoding="utf-8",
+    )
+
+    calibrator = load_ml_calibrator(MLCalibratorConfig(enabled=True, artifact_dir=str(artifact_dir)))
+    scores = calibrator.score_objectives(build_agent(mode="evidence_gate_only", max_steps=15).policy)
+
+    assert scores.available is False
+    assert scores.reason == "objective_calibrator_disabled"
 
 
 class ObjectiveOnlyCalibrator:

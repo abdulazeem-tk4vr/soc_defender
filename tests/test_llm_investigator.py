@@ -1,6 +1,6 @@
 import json
 
-from defender.investigator import Investigator, LLMVerifier
+from defender.investigator import INVESTIGATOR_SYSTEM_PROMPT, Investigator, LLMVerifier
 from defender.llm import OllamaConfig, OllamaLLMClient, StaticJSONLLMClient, extract_json_object
 from defender.evidence_registry import EvidenceRegistry
 from defender.report_readiness import ReportReadinessTracker
@@ -22,6 +22,7 @@ def test_static_llm_drives_investigator_contract():
                 "sql": "SELECT * FROM process_events ORDER BY step DESC LIMIT 20",
                 "rationale": "check process events",
                 "confidence": 0.7,
+                "rag_query": "process events data staging host h-001 target evidence",
             }
         )
     )
@@ -34,6 +35,24 @@ def test_static_llm_drives_investigator_contract():
     assert intent.source_table == "process_events"
     assert intent.sql == "SELECT * FROM process_events ORDER BY step DESC LIMIT 20"
     assert intent.confidence == 0.7
+    assert intent.rag_query == "process events data staging host h-001 target evidence"
+
+
+def test_investigator_prompt_and_parser_reject_safe_prefix_contract():
+    assert "sql must NOT include the word safe as a prefix" in INVESTIGATOR_SYSTEM_PROMPT
+    assert "rag_query" in INVESTIGATOR_SYSTEM_PROMPT
+
+    intent = Investigator._intent_from_response(
+        {
+            "intent_type": "query_logs",
+            "source_table": "netflow",
+            "sql": "safe SELECT dst_domain FROM netflow ORDER BY step DESC LIMIT 20",
+            "confidence": 3.5,
+        }
+    )
+
+    assert intent.sql == "SELECT dst_domain FROM netflow ORDER BY step DESC LIMIT 20"
+    assert intent.confidence == 1.0
 
 
 def test_static_llm_drives_verifier_contract():

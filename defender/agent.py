@@ -12,7 +12,6 @@ from .observation import parse_observation
 from .policy import DefenderPolicy
 from .prompt_guard import LLMLocalizer, PromptGuard2
 from .rag import RAGIntel
-from .rag_query import RAGQueryPlanner
 from .scanner import InjectionScanner
 
 
@@ -40,7 +39,6 @@ class SocDefenderAgent:
                 policy=self.policy,
                 scanner=scanner,
                 rag=self.rag or RAGIntel(),
-                rag_query_planner=RAGQueryPlanner(self.llm_client),
                 investigator=Investigator(self.llm_client),
                 verifier=LLMVerifier(self.llm_client),
             )

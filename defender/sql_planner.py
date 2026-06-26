@@ -1,8 +1,25 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
-from .actions import is_safe_select, query_logs
+from .actions import is_safe_select, query_logs, referenced_tables
+
+
+VALID_COLUMNS = {
+    "email_logs": {"email_id", "scenario_id", "step", "sender", "recipient", "subject", "body", "is_phish", "injection_id", "trust_tier", "source", "created_at"},
+    "netflow": {"flow_id", "scenario_id", "step", "src_host", "dst_host", "dst_domain", "dst_port", "protocol", "bytes_sent", "bytes_received", "trust_tier", "source", "created_at"},
+    "process_events": {"event_id", "scenario_id", "step", "host_id", "user_id", "process_name", "command_line", "parent_process", "trust_tier", "source", "created_at"},
+    "auth_logs": {"auth_id", "scenario_id", "step", "user_id", "host_id", "source_ip", "auth_type", "success", "trust_tier", "source", "created_at"},
+    "alerts": {"alert_id", "scenario_id", "step", "alert_type", "severity", "message", "related_log_id", "injection_id", "trust_tier", "source", "created_at"},
+}
+
+SQL_KEYWORDS = {
+    "and", "as", "asc", "by", "desc", "distinct", "from", "group", "having", "in", "inner",
+    "is", "join", "left", "like", "limit", "not", "null", "on", "or", "order", "select", "where",
+}
+
+SQL_FUNCTIONS = {"avg", "count", "max", "min", "sum"}
 
 
 def quote_sql(value: str) -> str:
@@ -22,18 +39,35 @@ class SQLPlanner:
     def already_emitted(self, sql: str) -> bool:
         return sql.strip() in self.emitted_queries
 
-    def action_for_sql(self, sql: str):
-        sql = self.repair(sql)
+    def action_for_sql(self, sql: str, report_gaps: set[str] | None = None):
+        sql = self.repair(sql, report_gaps)
         self.emitted_queries.add(sql)
         self.emitted_counts[sql] = self.emitted_counts.get(sql, 0) + 1
         self.last_emitted_sql = sql
         return query_logs(sql)
 
-    def repair(self, sql: str) -> str:
+    def repair(self, sql: str, report_gaps: set[str] | None = None) -> str:
         sql = sql.strip()
-        if is_safe_select(sql) and sql not in self.failed_queries and not self.already_emitted(sql):
+        if (
+            is_safe_select(sql)
+            and self.is_schema_valid(sql)
+            and sql not in self.failed_queries
+            and not self.already_emitted(sql)
+        ):
             return sql
-        return self.next_broad_query()
+        return self.next_broad_query(report_gaps)
+
+    def is_schema_valid(self, sql: str) -> bool:
+        tables = referenced_tables(sql)
+        if not tables:
+            return False
+        normalized = re.sub(r"'[^']*'", "", sql.lower())
+        aliases = set(re.findall(r"\bas\s+([a-zA-Z_][a-zA-Z0-9_]*)\b", normalized, re.I))
+        tokens = set(re.findall(r"\b[a-zA-Z_][a-zA-Z0-9_]*\b", normalized))
+        allowed = set(SQL_KEYWORDS) | set(SQL_FUNCTIONS) | aliases | tables
+        for table in tables:
+            allowed.update(VALID_COLUMNS.get(table, set()))
+        return not (tokens - allowed)
 
     def next_broad_query(self, report_gaps: set[str] | None = None):
         report_gaps = report_gaps or set()
@@ -57,19 +91,19 @@ class SQLPlanner:
         ]
         if "attacker_domain" in report_gaps:
             return [
+                "SELECT DISTINCT dst_domain, COUNT(*) as cnt FROM netflow WHERE dst_domain IS NOT NULL GROUP BY dst_domain ORDER BY cnt DESC LIMIT 20",
+                "SELECT sender, subject, body FROM email_logs WHERE is_phish = 1 ORDER BY step DESC LIMIT 20",
+                "SELECT sender, subject, body FROM email_logs ORDER BY step DESC LIMIT 20",
+                "SELECT * FROM alerts WHERE message LIKE '%domain%' OR message LIKE '%phish%' ORDER BY step DESC LIMIT 20",
                 "SELECT * FROM netflow ORDER BY step DESC LIMIT 20",
-                "SELECT * FROM email_logs ORDER BY step DESC LIMIT 20",
-                "SELECT * FROM alerts ORDER BY step DESC LIMIT 20",
-                "SELECT * FROM process_events ORDER BY step DESC LIMIT 20",
-                "SELECT * FROM auth_logs ORDER BY step DESC LIMIT 20",
             ]
         if "data_target" in report_gaps:
             return [
-                "SELECT * FROM process_events ORDER BY step DESC LIMIT 20",
-                "SELECT * FROM netflow ORDER BY step DESC LIMIT 20",
+                "SELECT process_name, command_line, host_id, user_id FROM process_events ORDER BY step DESC LIMIT 20",
+                "SELECT process_name, command_line FROM process_events WHERE command_line IS NOT NULL ORDER BY step DESC LIMIT 20",
                 "SELECT * FROM alerts ORDER BY step DESC LIMIT 20",
-                "SELECT * FROM email_logs ORDER BY step DESC LIMIT 20",
-                "SELECT * FROM auth_logs ORDER BY step DESC LIMIT 20",
+                "SELECT * FROM netflow ORDER BY step DESC LIMIT 20",
+                "SELECT * FROM process_events ORDER BY step DESC LIMIT 20",
             ]
         return default
 
@@ -159,8 +193,16 @@ class SQLPlanner:
                 f"{value} ORDER BY step DESC LIMIT 20"
             )
         if entity_type == "domain":
+            sql = f"SELECT * FROM netflow WHERE dst_domain = {value} ORDER BY step DESC LIMIT 20"
+            if sql not in self.failed_queries and not self.already_emitted(sql):
+                return self.action_for_sql(sql)
+            like_val = quote_sql("%" + entity_value + "%")
             return self.action_for_sql(
-                "SELECT * FROM netflow WHERE dst_domain = "
-                f"{value} ORDER BY step DESC LIMIT 20"
+                f"SELECT sender, subject, body FROM email_logs WHERE sender LIKE {like_val} ORDER BY step DESC LIMIT 20"
+            )
+        if entity_type == "target":
+            like_val = quote_sql("%" + entity_value + "%")
+            return self.action_for_sql(
+                f"SELECT process_name, command_line FROM process_events WHERE command_line LIKE {like_val} ORDER BY step DESC LIMIT 20"
             )
         return self.action_for_sql(f"SELECT * FROM alerts WHERE message LIKE {quote_sql('%' + entity_value + '%')} ORDER BY step DESC LIMIT 20")

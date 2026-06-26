@@ -84,7 +84,7 @@ class QdrantRAGRetriever(RAGRetriever):
 def default_security_corpus() -> tuple[RAGDocument, ...]:
     return (
         RAGDocument("builtin", "Phishing Initial Access", "Phishing commonly yields compromised users and patient-zero hosts."),
-        RAGDocument("builtin", "Exfiltration Evidence", "Exfiltration evidence often appears in alerts or netflow with dst_domain and bytes."),
+        RAGDocument("builtin", "Exfiltration Evidence", "Exfiltration evidence often appears in alerts or netflow with dst_domain, bytes_sent, and bytes_received."),
         RAGDocument("builtin", "Data Staging Evidence", "Data staging evidence often appears in process events with target identifiers."),
         RAGDocument("builtin", "Containment", "Containment should isolate exact hosts, reset exact users, and block exact attacker domains only after support."),
     )

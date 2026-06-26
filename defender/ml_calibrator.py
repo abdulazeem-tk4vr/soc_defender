@@ -18,6 +18,7 @@ from .ml_features import (
 class MLCalibratorConfig:
     enabled: bool = False
     artifact_dir: str = "defender/models/opensec_train_calibrator"
+    objective_enabled: bool = False
     objective_weight: float = 0.0
     containment_advisory_only: bool = True
 
@@ -27,6 +28,7 @@ class MLCalibratorConfig:
         return cls(
             enabled=bool(value.get("enabled", False)),
             artifact_dir=str(value.get("artifact_dir", cls.artifact_dir)),
+            objective_enabled=bool(value.get("objective_enabled", False)),
             objective_weight=float(value.get("objective_weight", 0.0)),
             containment_advisory_only=bool(value.get("containment_advisory_only", True)),
         )
@@ -110,6 +112,8 @@ class ArtifactMLCalibrator(MLCalibrator):
         return True
 
     def score_objectives(self, state: Any, parsed: Any | None = None) -> ObjectiveScores:
+        if not self.config.objective_enabled:
+            return ObjectiveScores(available=False, reason="objective_calibrator_disabled")
         feature_vector = runtime_objective_features(state, parsed)
         if self.objective_model is not None:
             scores = self._predict_scores(self.objective_model, feature_vector.values, OBJECTIVE_LABELS)

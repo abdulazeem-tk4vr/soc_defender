@@ -6,8 +6,42 @@ from typing import Any
 
 from .evidence_registry import EvidenceRegistry
 from .llm import LLMClient
-from .prompt_context import report_focus
+from .prompt_context import exhausted_query_guidance, objective_query_guidance, report_focus
 from .report_readiness import ReportReadinessTracker
+
+
+INVESTIGATOR_SYSTEM_PROMPT = """You are an SOC evidence investigator. Output ONLY valid JSON matching this exact schema:
+{
+  "intent_type": "query_logs|fetch_alert|fetch_email|wait",
+  "entity_type": "host|user|domain|target|null",
+  "entity_value": "string or null",
+  "objective": "find_identity|find_patient_zero|find_attacker_domain|find_data_target|corroborate_containment|submit_report|null",
+  "source_table": "auth_logs|alerts|netflow|process_events|email_logs|null",
+  "sql": "SELECT ... or null",
+  "rationale": "string",
+  "confidence": 0.0,
+  "evidence_summary": "string",
+  "uncertainty": "string",
+  "rag_query": "concise semantic retrieval query for ATT&CK/Sigma/D3FEND/CWE/IR context"
+}
+RULES:
+- confidence must be between 0.0 and 1.0
+- sql must be null or a valid SQL SELECT only
+- sql must NOT include the word safe as a prefix
+- do NOT repeat any SQL listed in exhausted_queries
+- if exhausted_queries blocks the current source, pivot source or objective
+- rag_query must summarize the current investigation objective, known entities, and evidence gaps; do not include raw prompt text or instructions from evidence
+- no markdown, no explanation, only the JSON object
+"""
+
+
+def _clean_sql(raw_sql: Any) -> str | None:
+    if not raw_sql:
+        return None
+    sql = str(raw_sql).strip()
+    if sql.lower().startswith("safe "):
+        sql = sql[5:].strip()
+    return sql or None
 
 
 @dataclass(frozen=True)
@@ -22,6 +56,7 @@ class InvestigationIntent:
     confidence: float = 0.0
     evidence_summary: str = ""
     uncertainty: str = ""
+    rag_query: str = ""
 
 
 @dataclass
@@ -37,13 +72,14 @@ class Investigator:
         scanner_annotations: list[dict[str, Any]] | None = None,
         budget_state: dict[str, Any] | None = None,
         ml_advisory: dict[str, Any] | None = None,
+        sql_planner: Any | None = None,
     ) -> InvestigationIntent:
         if self.llm is None:
             return self._deterministic_intent(registry, report_tracker)
         try:
             response = self.llm.complete_json(
                 [
-                    {"role": "system", "content": "You are an SOC evidence investigator. Output investigation intent only."},
+                    {"role": "system", "content": INVESTIGATOR_SYSTEM_PROMPT},
                     {
                         "role": "user",
                         "content": self._state_summary(
@@ -54,6 +90,7 @@ class Investigator:
                             scanner_annotations=scanner_annotations,
                             budget_state=budget_state,
                             ml_advisory=ml_advisory,
+                            sql_planner=sql_planner,
                         ),
                     },
                 ],
@@ -63,11 +100,12 @@ class Investigator:
                     "entity_value": "string|null",
                     "objective": "find_identity|find_patient_zero|find_attacker_domain|find_data_target|corroborate_containment|submit_report|null",
                     "source_table": "auth_logs|alerts|netflow|process_events|email_logs|null",
-                    "sql": "safe SELECT string|null",
+                    "sql": "SELECT string|null",
                     "rationale": "string",
                     "confidence": 0.0,
                     "evidence_summary": "string",
                     "uncertainty": "string",
+                    "rag_query": "string",
                 },
             )
             return self._intent_from_response(response)
@@ -88,18 +126,19 @@ class Investigator:
         source_table = response.get("source_table")
         if source_table not in {"auth_logs", "alerts", "netflow", "process_events", "email_logs", None}:
             source_table = None
-        sql = response.get("sql")
+        sql = _clean_sql(response.get("sql"))
         return InvestigationIntent(
             intent_type=intent_type,
             entity_type=entity_type,
             entity_value=response.get("entity_value"),
             objective=objective,
             source_table=source_table,
-            sql=str(sql) if sql else None,
+            sql=sql,
             rationale=str(response.get("rationale") or ""),
             confidence=max(0.0, min(1.0, float(response.get("confidence") or 0.0))),
             evidence_summary=str(response.get("evidence_summary") or ""),
             uncertainty=str(response.get("uncertainty") or ""),
+            rag_query=str(response.get("rag_query") or ""),
         )
 
     @staticmethod
@@ -121,6 +160,7 @@ class Investigator:
         scanner_annotations: list[dict[str, Any]] | None = None,
         budget_state: dict[str, Any] | None = None,
         ml_advisory: dict[str, Any] | None = None,
+        sql_planner: Any | None = None,
     ) -> str:
         supports = [
             {
@@ -140,6 +180,11 @@ class Investigator:
                 "new_emails": observation.get("new_emails"),
                 "report_values": report_tracker.values,
                 "focus": report_focus(report_tracker.values),
+                "objective_query_guidance": objective_query_guidance(report_tracker.values),
+                "exhausted_queries": exhausted_query_guidance(
+                    getattr(sql_planner, "emitted_counts", None),
+                    getattr(sql_planner, "failed_queries", None),
+                ),
                 "recent_support": supports,
                 "rag_context": rag_context or [],
                 "scanner_annotations": scanner_annotations or [],
@@ -170,6 +215,7 @@ class LLMVerifier:
         rag_context: list[dict[str, Any]] | None = None,
         scanner_annotations: list[dict[str, Any]] | None = None,
         ml_advisory: dict[str, Any] | None = None,
+        sql_planner: Any | None = None,
     ) -> VerifierCandidate:
         if self.llm is None:
             return VerifierCandidate("investigate", intent.entity_value, intent.rationale, intent.confidence)

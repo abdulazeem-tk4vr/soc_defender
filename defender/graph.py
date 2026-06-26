@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -9,7 +10,6 @@ from .investigator import InvestigationIntent, Investigator, LLMVerifier, Verifi
 from .observation import parse_observation
 from .policy import DefenderPolicy
 from .rag import RAGIntel
-from .rag_query import RAGQueryPlanner
 from .responder import Responder, action_payload, verified_candidate_payload
 from .scanner import InjectionScanner
 
@@ -19,7 +19,6 @@ class DefenderGraph:
     policy: DefenderPolicy = field(default_factory=DefenderPolicy)
     scanner: InjectionScanner = field(default_factory=InjectionScanner)
     rag: RAGIntel = field(default_factory=RAGIntel)
-    rag_query_planner: RAGQueryPlanner = field(default_factory=RAGQueryPlanner)
     investigator: Investigator = field(default_factory=Investigator)
     verifier: LLMVerifier = field(default_factory=LLMVerifier)
 
@@ -34,11 +33,10 @@ class DefenderGraph:
         self.policy.ensure_scenario(state.parsed_observation)
         self._scanner_node(state)
         self._registry_node(state)
-        self._rag_query_node(state)
-        self._rag_node(state)
         self._budget_node(state)
         self._ml_advisory_node(state)
         self._investigator_node(state)
+        self._rag_node(state)
         self._verifier_node(state)
         action = self._responder_node(state)
         return action, state
@@ -65,36 +63,35 @@ class DefenderGraph:
     def _registry_node(self, state: DefenderGraphState) -> None:
         parsed = state.parsed_observation or parse_observation(state.observation)
         before = len(self.policy.registry.supports)
+        result = parsed.last_action_result or {}
+        data = result.get("data") or {}
+        row_samples = []
+        rows = data.get("rows") if isinstance(data, dict) else None
+        if isinstance(rows, list):
+            for row in rows[:3]:
+                if isinstance(row, dict):
+                    row_samples.append({key: row.get(key) for key in sorted(row) if key in {"alert_id", "event_id", "flow_id", "message", "command_line", "dst_domain", "host_id", "user_id", "trust_tier", "source"}})
         self.policy.registry.update_from_observation(parsed)
         self.policy.report_tracker.update(self.policy.registry)
         self.policy._record_failed_query(parsed)
+        entity_counts: dict[str, int] = {}
+        for support in self.policy.registry.supports:
+            entity_counts[support.entity_type] = entity_counts.get(support.entity_type, 0) + 1
         state.append_trace(
             "registry",
             {
                 "supports_before_action": before,
                 "supports_after_update": len(self.policy.registry.supports),
+                "last_result_row_samples": row_samples,
+                "support_entity_counts": entity_counts,
+                "best_entities": {kind: self.policy.registry.best_entities(kind)[:5] for kind in ("host", "user", "domain", "target")},
                 "report_values": dict(self.policy.report_tracker.values),
             },
         )
 
-    def _rag_query_node(self, state: DefenderGraphState) -> None:
-        plan = self.rag_query_planner.plan(state.observation, self.policy.registry, self.policy.report_tracker)
-        state.rag_query = plan.query
-        state.append_trace(
-            "rag_query",
-            {
-                "query": plan.query,
-                "source": plan.source,
-                "rationale": plan.rationale,
-            },
-        )
-
     def _rag_node(self, state: DefenderGraphState) -> None:
-        query = state.rag_query or self.rag_query_planner.plan(
-            state.observation,
-            self.policy.registry,
-            self.policy.report_tracker,
-        ).query
+        query = self._rag_retrieval_text(state)
+        state.rag_query = query
         docs = self.rag.context_for(query)
         state.rag_context = [asdict(doc) for doc in docs]
         state.append_trace(
@@ -105,6 +102,49 @@ class DefenderGraph:
                 "top_documents": [{"source": doc.source, "title": doc.title} for doc in docs[:3]],
             },
         )
+
+
+    def _rag_retrieval_text(self, state: DefenderGraphState) -> str:
+        observation = state.observation
+        result = observation.get("last_action_result") or {}
+        data = result.get("data") if isinstance(result, dict) else None
+        opensec_result = {
+            "ok": result.get("ok") if isinstance(result, dict) else None,
+            "message": result.get("message") if isinstance(result, dict) else "",
+            "data": data,
+        }
+        payload = {
+            "investigator": state.investigation_intent,
+            "opensec_result": opensec_result,
+            "attacker_state": observation.get("attacker_state"),
+            "new_alerts": observation.get("new_alerts"),
+            "new_emails": observation.get("new_emails"),
+            "report_values": self.policy.report_tracker.values,
+            "known_entities": {kind: self.policy.registry.best_entities(kind)[:5] for kind in ("host", "user", "domain", "target")},
+        }
+        investigator_query = str(state.investigation_intent.get("rag_query") or "").strip()
+        text = json.dumps(payload, sort_keys=True, default=str)
+        plain_terms = " ".join(self._rag_plain_terms({"opensec_result": opensec_result, "known_entities": payload["known_entities"]}))
+        if investigator_query:
+            return f"{investigator_query}\n{text}\n{plain_terms}"[:4000]
+        fallback_terms = " ".join(self._rag_plain_terms(payload))
+        return f"{text}\n{fallback_terms}"[:4000]
+
+    def _rag_plain_terms(self, value: Any) -> list[str]:
+        if isinstance(value, dict):
+            terms: list[str] = []
+            for key, item in value.items():
+                terms.append(str(key))
+                terms.extend(self._rag_plain_terms(item))
+            return terms
+        if isinstance(value, (list, tuple)):
+            terms = []
+            for item in value:
+                terms.extend(self._rag_plain_terms(item))
+            return terms
+        if value is None:
+            return []
+        return [str(value)]
 
 
     def _ml_advisory_node(self, state: DefenderGraphState) -> None:
@@ -144,6 +184,7 @@ class DefenderGraph:
             scanner_annotations=state.scanner_annotations,
             budget_state=state.budget_state,
             ml_advisory=state.ml_advisory,
+            sql_planner=self.policy.sql_planner,
         )
         state.investigation_intent = asdict(intent)
         state.append_trace("investigator", state.investigation_intent)
@@ -168,6 +209,7 @@ class DefenderGraph:
             rag_context=state.rag_context,
             scanner_annotations=state.scanner_annotations,
             ml_advisory=state.ml_advisory,
+            sql_planner=self.policy.sql_planner,
         )
         state.verifier_candidate = asdict(candidate)
         state.append_trace("verifier", state.verifier_candidate)

@@ -110,7 +110,8 @@ class Responder:
                 self.policy.fetched_emails.add(email_id)
                 return fetch_email(email_id)
         if intent.intent_type == "query_logs" and intent.sql and is_safe_select(intent.sql):
-            return self.policy.sql_planner.action_for_sql(intent.sql)
+            gaps = set(report_gaps(self.policy.report_tracker.values))
+            return self.policy.sql_planner.action_for_sql(intent.sql, gaps)
         if intent.intent_type == "query_logs" and (intent.source_table or intent.objective):
             gaps = set(report_gaps(self.policy.report_tracker.values))
             objective = self.policy._progress_guarded_objective(intent.objective, gaps)

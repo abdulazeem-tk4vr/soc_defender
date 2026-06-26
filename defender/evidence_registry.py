@@ -62,13 +62,16 @@ def _indicators(text: str) -> tuple[str, ...]:
 
 
 def _entity_id(row: dict[str, Any], table: str) -> str:
-    for key in ("email_id", "alert_id", "auth_id", "flow_id", "event_id"):
+    for key in ("email_id", "alert_id", "auth_id", "flow_id", "event_id", "template_id", "artifact_id"):
         if row.get(key):
             return str(row[key])
     return f"{table}:{abs(hash(_text_from_row(row)))}"
 
 
 def _source_table(row: dict[str, Any], default: str = "unknown") -> str:
+    table = row.get("table") or row.get("source_table")
+    if isinstance(table, str) and table:
+        return table
     if "email_id" in row:
         return "email_logs"
     if "alert_id" in row:
@@ -94,12 +97,17 @@ def _extract_entities(row: dict[str, Any]) -> list[tuple[str, str, tuple[str, ..
                 candidates.append((text, "user"))
         if field in {"dst_domain", "destination_domain", "domain", "attacker_domain"}:
             candidates.append((text, "domain"))
-        if field in {"target_id", "data_target"}:
+        if field in {"target_id", "data_target", "target"}:
             candidates.append((text, "target"))
+        if field in {"command_line", "cmd"}:
+            for match in re.finditer(r"\btarget=([A-Za-z0-9_.-]+)\b", text):
+                candidates.append((match.group(1), "target"))
         candidates.extend((match.group(0), "host") for match in HOST_RE.finditer(text))
         candidates.extend((match.group(0), "user") for match in USER_RE.finditer(text))
         candidates.extend((match.group(0), "target") for match in TARGET_RE.finditer(text))
         candidates.extend((match.group(1), "domain") for match in DOMAIN_KV_RE.finditer(text))
+        if field in {"message", "template_body", "body", "cmd", "command", "url"}:
+            candidates.extend((match.group(0), "domain") for match in DOMAIN_RE.finditer(text))
         for value, entity_type in candidates:
             value = value.strip().strip('",')
             if not value or value == ".":

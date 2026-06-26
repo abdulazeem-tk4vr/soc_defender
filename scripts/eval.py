@@ -352,6 +352,7 @@ def main() -> int:
     parser.add_argument("--rag-device", default="", help="Optional RAG embedder device, e.g. cuda or cpu")
     parser.add_argument("--use-langgraph", action="store_true", help="Run full_agentic through the optional LangGraph adapter")
     parser.add_argument("--ml-calibrator", action="store_true", help="Enable train-only ML calibrator artifacts for local defender modes")
+    parser.add_argument("--ml-objective-calibrator", action="store_true", help="Opt into ML objective scoring; disabled by default while deterministic report-gap objectives are preferred")
     parser.add_argument("--ml-artifact-dir", default=str(ROOT / "defender" / "models" / "opensec_train_calibrator"))
     parser.add_argument("--llm-log", default="", help="Optional JSONL path for internal LLM raw/parsed traces")
     parser.add_argument(
@@ -388,7 +389,11 @@ def main() -> int:
 
     ml_config = None
     if args.ml_calibrator:
-        ml_config = {"enabled": True, "artifact_dir": args.ml_artifact_dir}
+        ml_config = {
+            "enabled": True,
+            "artifact_dir": args.ml_artifact_dir,
+            "objective_enabled": args.ml_objective_calibrator,
+        }
 
     if args.defender != "baseline":
         model_name = args.defender + ("+ml" if args.ml_calibrator else "")
