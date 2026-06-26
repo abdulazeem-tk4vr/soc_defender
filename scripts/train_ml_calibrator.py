@@ -28,6 +28,10 @@ from scripts.build_ml_training_set import TrainPathError, assert_train_only_path
 DEFAULT_EMBEDDING_MODEL = "cisco-ai/SecureBERT2.0-biencoder"
 
 
+def log(message: str) -> None:
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}", flush=True)
+
+
 def evidence_text(example: dict[str, Any]) -> str:
     texts = [str(item.get("text") or "") for item in example.get("available_evidence") or []]
     text = "\n\n".join(part for part in texts if part.strip())
@@ -46,8 +50,10 @@ def text_hash(text: str) -> str:
 
 def load_embedding_cache(path: Path | None) -> dict[str, list[float]]:
     if path is None or not path.exists():
+        log("embedding cache: no existing cache")
         return {}
     cache: dict[str, list[float]] = {}
+    log(f"embedding cache: loading {path}")
     with path.open(encoding="utf-8") as f:
         for line in f:
             if not line.strip():
@@ -55,12 +61,14 @@ def load_embedding_cache(path: Path | None) -> dict[str, list[float]]:
             row = json.loads(line)
             if isinstance(row.get("embedding"), list) and row.get("text_hash"):
                 cache[str(row["text_hash"])] = [float(value) for value in row["embedding"]]
+    log(f"embedding cache: loaded {len(cache)} entries")
     return cache
 
 
 def save_embedding_cache(path: Path | None, cache: dict[str, list[float]]) -> None:
     if path is None:
         return
+    log(f"embedding cache: writing {len(cache)} entries to {path}")
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
         for key in sorted(cache):
@@ -78,16 +86,21 @@ def embed_examples(
     except Exception as exc:  # pragma: no cover - depends on optional package
         raise OptionalDependencyError("sentence-transformers is required for --embed") from exc
 
+    log(f"embedding: preparing {len(examples)} examples with model={model_name}")
     cache = load_embedding_cache(cache_path)
     texts = [evidence_text(example) for example in examples]
     keys = [text_hash(text) for text in texts]
     missing = [(key, text) for key, text in zip(keys, texts, strict=True) if key not in cache]
+    log(f"embedding: cache hits={len(texts) - len(missing)} missing={len(missing)}")
     if missing:
+        log("embedding: loading sentence-transformers model")
         model = SentenceTransformer(model_name)
+        log(f"embedding: encoding {len(missing)} texts batch_size={batch_size}")
         encoded = model.encode([text for _, text in missing], batch_size=batch_size, show_progress_bar=True, normalize_embeddings=True)
         for (key, _), vector in zip(missing, encoded, strict=True):
             cache[key] = [float(value) for value in vector]
         save_embedding_cache(cache_path, cache)
+    log("embedding: assembling embedding matrix")
     embeddings = [cache[key] for key in keys]
     dimension = len(embeddings[0]) if embeddings else 0
     return embeddings, {
@@ -108,10 +121,13 @@ def add_embedding_unsupervised_features(examples: list[dict[str, Any]], embeddin
         raise OptionalDependencyError("scikit-learn is required for embedding unsupervised features") from exc
 
     if not embeddings:
+        log("unsupervised: skipped empty embedding matrix")
         return {"isolation_forest": "skipped_empty", "hdbscan": "skipped_empty"}
 
+    log(f"unsupervised: fitting IsolationForest rows={len(embeddings)} dims={len(embeddings[0]) if embeddings else 0}")
     isolation_model = IsolationForest(n_estimators=100, contamination="auto", random_state=7)
     isolation_model.fit(embeddings)
+    log("unsupervised: scoring IsolationForest")
     anomaly_scores = isolation_model.decision_function(embeddings)
     for example, score in zip(examples, anomaly_scores, strict=True):
         features = dict(example.get("ml_features") or {})
@@ -122,8 +138,10 @@ def add_embedding_unsupervised_features(examples: list[dict[str, Any]], embeddin
     try:
         import hdbscan  # type: ignore
 
+        log("unsupervised: fitting HDBSCAN min_cluster_size=10")
         cluster_model = hdbscan.HDBSCAN(min_cluster_size=10, prediction_data=True)
         cluster_model.fit(embeddings)
+        log("unsupervised: HDBSCAN fit complete")
         probabilities = getattr(cluster_model, "probabilities_", [0.0] * len(examples))
         labels = getattr(cluster_model, "labels_", [-1] * len(examples))
         for example, label, probability in zip(examples, labels, probabilities, strict=True):
@@ -133,7 +151,8 @@ def add_embedding_unsupervised_features(examples: list[dict[str, Any]], embeddin
             features["cluster_is_noise"] = 1.0 if int(label) == -1 else 0.0
             example["ml_features"] = features
         hdbscan_status = "trained"
-    except Exception:
+    except Exception as exc:
+        log(f"unsupervised: HDBSCAN unavailable or failed: {exc}")
         for example in examples:
             features = dict(example.get("ml_features") or {})
             features.setdefault("cluster_id", 0.0)
@@ -184,6 +203,7 @@ def train_xgboost_models(examples: list[dict[str, Any]], artifact_dir: Path) -> 
     except Exception as exc:  # pragma: no cover - depends on optional package
         raise OptionalDependencyError("xgboost is required for --train-xgboost") from exc
 
+    log(f"xgboost: vectorizing {len(examples)} examples")
     x = matrix_from_examples(examples)
     objective_labels = [(example.get("labels") or {}).get("investigation_objective") for example in examples]
     containment_labels = [(example.get("labels") or {}).get("containment_sufficiency") for example in examples]
@@ -210,8 +230,11 @@ def train_xgboost_models(examples: list[dict[str, Any]], artifact_dir: Path) -> 
         eval_metric="logloss",
         random_state=7,
     )
+    log("xgboost: fitting investigation objective model")
     objective_model.fit(x, y_objective)
+    log("xgboost: fitting containment sufficiency model")
     containment_model.fit(x, y_containment)
+    log("xgboost: saving models")
     objective_model.save_model(str(artifact_dir / "investigation_xgb.json"))
     containment_model.save_model(str(artifact_dir / "containment_xgb.json"))
     return {"xgboost": "trained", "objective_classes": OBJECTIVE_LABELS, "containment_classes": CONTAINMENT_LABELS}
@@ -224,7 +247,10 @@ def train_unsupervised_placeholders(examples: list[dict[str, Any]], artifact_dir
     except Exception as exc:  # pragma: no cover - depends on optional package
         raise OptionalDependencyError("joblib and scikit-learn are required for --train-unsupervised") from exc
 
+    log(f"xgboost: vectorizing {len(examples)} examples")
+    log(f"unsupervised-structured: vectorizing {len(examples)} examples")
     x = matrix_from_examples(examples)
+    log("unsupervised-structured: fitting IsolationForest")
     isolation_model = IsolationForest(n_estimators=100, contamination="auto", random_state=7)
     isolation_model.fit(x)
     joblib.dump(isolation_model, artifact_dir / "isolation_model.joblib")
@@ -233,6 +259,7 @@ def train_unsupervised_placeholders(examples: list[dict[str, Any]], artifact_dir
     try:
         import hdbscan  # type: ignore
 
+        log("unsupervised-structured: fitting HDBSCAN min_cluster_size=10")
         cluster_model = hdbscan.HDBSCAN(min_cluster_size=10, prediction_data=True)
         cluster_model.fit(x)
         joblib.dump(cluster_model, artifact_dir / "cluster_model.joblib")
@@ -254,6 +281,7 @@ def write_artifacts(
     embedding_cache: Path | None = None,
     embedding_batch_size: int = 16,
 ) -> dict[str, Any]:
+    log(f"artifacts: preparing {artifact_dir}")
     artifact_dir.mkdir(parents=True, exist_ok=True)
     embedding_metadata = {
         "backend": "sentence-transformers",
@@ -266,6 +294,7 @@ def write_artifacts(
     else:
         training_unsupervised = None
 
+    log("features: building schema and label priors")
     schema = feature_schema()
     objective_counts = label_counts(examples, "investigation_objective")
     containment_counts = label_counts(examples, "containment_sufficiency")
@@ -277,6 +306,7 @@ def write_artifacts(
         "objective_priors": label_priors(objective_counts, OBJECTIVE_LABELS),
         "containment_priors": label_priors(containment_counts, CONTAINMENT_LABELS),
     }
+    log("artifacts: writing schemas and metadata")
     write_json(artifact_dir / "feature_schema.json", schema)
     write_json(artifact_dir / "label_schema.json", label_schema)
     write_json(artifact_dir / "embedding_metadata.json", embedding_metadata)
@@ -289,6 +319,7 @@ def write_artifacts(
     if train_unsupervised and training_unsupervised is None:
         training_status["unsupervised"] = train_unsupervised_placeholders(examples, artifact_dir)
 
+    log("artifacts: building manifest and calibration report")
     scenario_ids = sorted({str(example.get("scenario_id")) for example in examples})
     manifest = {
         "artifact_version": "opensec-train-calibrator-v1",
@@ -313,6 +344,7 @@ def write_artifacts(
             "training_status": training_status,
         },
     )
+    log("artifacts: write complete")
     return manifest
 
 
@@ -334,7 +366,9 @@ def main() -> None:
     try:
         if train_dir is not None:
             assert_train_only_path(train_dir)
+        log(f"examples: loading {examples_path}")
         examples = load_jsonl(examples_path)
+        log(f"examples: loaded {len(examples)} examples")
     except TrainPathError:
         raise
     if not examples:

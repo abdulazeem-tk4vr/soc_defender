@@ -1,0 +1,57 @@
+{
+  "containment_labels": [
+    "insufficient_evidence",
+    "sufficient_evidence"
+  ],
+  "feature_names": [
+    "step_index",
+    "steps_remaining",
+    "max_steps",
+    "missing_patient_zero_host",
+    "missing_compromised_user",
+    "missing_attacker_domain",
+    "missing_data_target",
+    "candidate_type_host",
+    "candidate_type_user",
+    "candidate_type_domain",
+    "candidate_type_target",
+    "available_evidence_count",
+    "evidence_alerts_count",
+    "evidence_auth_logs_count",
+    "evidence_email_logs_count",
+    "evidence_netflow_count",
+    "evidence_process_events_count",
+    "trust_verified_count",
+    "trust_corroborated_count",
+    "trust_untrusted_count",
+    "has_prompt_injection_target",
+    "has_injection_evidence",
+    "has_untrusted_evidence",
+    "indicator_phish",
+    "indicator_credential",
+    "indicator_lateral",
+    "indicator_stage",
+    "indicator_target",
+    "indicator_exfil",
+    "indicator_dst_domain",
+    "cluster_id",
+    "cluster_probability",
+    "cluster_is_noise",
+    "anomaly_score"
+  ],
+  "field_labels": [
+    "patient_zero_host",
+    "compromised_user",
+    "attacker_domain",
+    "data_target"
+  ],
+  "objective_labels": [
+    "find_identity",
+    "find_patient_zero",
+    "find_attacker_domain",
+    "find_data_target",
+    "corroborate_containment",
+    "submit_report"
+  ],
+  "schema_version": "ml-features-v1"
+}

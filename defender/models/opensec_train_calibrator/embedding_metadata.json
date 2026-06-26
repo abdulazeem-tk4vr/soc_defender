@@ -1,0 +1,9 @@
+{
+  "backend": "sentence-transformers",
+  "cache_entries": 2901,
+  "cache_path": "/workspace/soc_defender/outputs/ml_training/embedding_cache.jsonl",
+  "dimension": 768,
+  "model": "cisco-ai/SecureBERT2.0-biencoder",
+  "status": "embedded",
+  "texts": 21573
+}

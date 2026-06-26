@@ -1,0 +1,38 @@
+{
+  "containment_counts": {
+    "insufficient_evidence": 15342,
+    "sufficient_evidence": 6231
+  },
+  "containment_labels": [
+    "insufficient_evidence",
+    "sufficient_evidence"
+  ],
+  "containment_priors": {
+    "insufficient_evidence": 0.7111667361980253,
+    "sufficient_evidence": 0.2888332638019747
+  },
+  "objective_counts": {
+    "corroborate_containment": 12933,
+    "find_attacker_domain": 1440,
+    "find_data_target": 1440,
+    "find_identity": 1440,
+    "find_patient_zero": 2880,
+    "submit_report": 1440
+  },
+  "objective_labels": [
+    "find_identity",
+    "find_patient_zero",
+    "find_attacker_domain",
+    "find_data_target",
+    "corroborate_containment",
+    "submit_report"
+  ],
+  "objective_priors": {
+    "corroborate_containment": 0.5994993742177722,
+    "find_attacker_domain": 0.06675010429703797,
+    "find_data_target": 0.06675010429703797,
+    "find_identity": 0.06675010429703797,
+    "find_patient_zero": 0.13350020859407594,
+    "submit_report": 0.06675010429703797
+  }
+}

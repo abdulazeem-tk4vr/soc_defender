@@ -32,7 +32,12 @@ Verification so far:
 - Artifact packaging smoke passed using the one-seed train JSONL: `outputs/ml_training/artifact_smoke`.
 - Packaged artifact loaded through `build_agent(..., ml_config={"enabled": true, "artifact_dir": "outputs/ml_training/artifact_smoke"})`.
 - Final full suite passed after the second slice: `65 passed`.
-- Embedding pipeline code path added and focused tests passed. Current environment is missing `sentence-transformers`, `xgboost`, `hdbscan`, `scikit-learn`, and `joblib`, so real SecureBERT2 artifact training was not run here.
+- Embedding pipeline code path added and focused tests passed.
+- Full train-only artifact produced under `defender/models/opensec_train_calibrator`: 160 seeds, 21,573 examples, SecureBERT2 embeddings, IsolationForest, HDBSCAN, and XGBoost trained.
+- Trained artifact loads through `build_agent` with `ArtifactMLCalibrator` available.
+- Training script now emits timestamped progress logs for examples, embedding cache, embedding, IsolationForest, HDBSCAN, XGBoost, and artifact writes.
+- Eval CLI now supports `--ml-calibrator` and `--ml-artifact-dir`.
+- ML-enabled one-seed train eval smoke passed: `evidence_gate_only+ml`, reward `2.30`, containment attempted.
 
 ## Objective
 
@@ -215,7 +220,7 @@ Acceptance checks:
 
 ## Phase 2: Feature And Embedding Pipeline
 
-Status: structured feature schema and optional SecureBERT2 embedding/cache path implemented; real embedding run pending dependency install
+Status: complete for train artifact generation; eval ablation pending
 
 Goal: turn examples into stable numeric features with SecureBERT2 embeddings and unsupervised calibration features.
 
@@ -272,7 +277,7 @@ Acceptance checks:
 
 ## Phase 3: XGBoost Model Training
 
-Status: training/artifact script and optional embedding/XGBoost/unsupervised paths implemented; live optional dependency training pending
+Status: complete for train artifact generation; eval ablation pending
 
 Goal: train two advisory models and produce inspectable calibration reports.
 
@@ -436,7 +441,7 @@ Acceptance checks:
 
 ## Phase 8: Evaluation And Ablation
 
-Status: not started
+Status: eval CLI and one-seed ML smoke complete; train/eval ablation batches pending
 
 Goal: compare deterministic baseline, ML-guided planning, and ML containment advisory under train-only tuning and eval-only measurement.
 

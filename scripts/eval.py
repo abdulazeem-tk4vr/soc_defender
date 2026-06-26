@@ -176,6 +176,7 @@ def run_episode(
     rag_device: str = "",
     prompt_guard2_model: str = "",
     use_langgraph: bool = False,
+    ml_config: dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     env = OpenSecEnvironment(seed_path=str(seed_path))
     reset_result = env.reset()
@@ -195,6 +196,7 @@ def run_episode(
             rag=rag,
             prompt_guard2_model=prompt_guard2_model or None,
             use_langgraph=use_langgraph,
+            ml_config=ml_config,
         )
         if defender != "baseline"
         else None
@@ -315,6 +317,11 @@ def run_episode(
             "temperature": attacker_temp,
             "replay_cache_path": replay_cache,
         },
+        "ml_calibrator": {
+            "enabled": bool(getattr(getattr(agent, "policy", None), "ml_calibrator", None)) if agent is not None else False,
+            "artifact_dir": (ml_config or {}).get("artifact_dir") if ml_config else None,
+            "manifest": getattr(getattr(getattr(agent, "policy", None), "ml_calibrator", None), "manifest", {}) if agent is not None else {},
+        },
     }
 
 
@@ -344,6 +351,8 @@ def main() -> int:
     parser.add_argument("--no-rag", action="store_true", help="Disable RAG retrieval and Qdrant auto-load for ablations")
     parser.add_argument("--rag-device", default="", help="Optional RAG embedder device, e.g. cuda or cpu")
     parser.add_argument("--use-langgraph", action="store_true", help="Run full_agentic through the optional LangGraph adapter")
+    parser.add_argument("--ml-calibrator", action="store_true", help="Enable train-only ML calibrator artifacts for local defender modes")
+    parser.add_argument("--ml-artifact-dir", default=str(ROOT / "defender" / "models" / "opensec_train_calibrator"))
     parser.add_argument(
         "--prompt-guard2-model",
         default="none",
@@ -370,8 +379,13 @@ def main() -> int:
     elif not args.rag_path and (ROOT / "data" / "rag" / "qdrant" / "build_manifest.json").exists():
         args.rag_path = str(ROOT / "data" / "rag" / "qdrant")
 
+    ml_config = None
+    if args.ml_calibrator:
+        ml_config = {"enabled": True, "artifact_dir": args.ml_artifact_dir}
+
     if args.defender != "baseline":
-        model_list = [{"name": args.defender, "provider": "agent"}]
+        model_name = args.defender + ("+ml" if args.ml_calibrator else "")
+        model_list = [{"name": model_name, "provider": "agent"}]
     elif args.ollama:
         model_list = [
             {
@@ -392,7 +406,7 @@ def main() -> int:
     seeds = manifest[args.split]
     if args.tier:
         if args.tier == "standard":
-            seeds = [entry for entry in seeds if entry.get("tier") in {"adaptive", "direct_harm", "data_exfil"}]
+            seeds = [entry for entry in seeds if entry.get("tier") in {"standard", "adaptive", "direct_harm", "data_exfil"}]
         else:
             seeds = [entry for entry in seeds if entry.get("tier") == args.tier]
     seeds = [Path(entry["seed_path"]) for entry in seeds]
@@ -445,6 +459,7 @@ def main() -> int:
                     rag_device=args.rag_device,
                     prompt_guard2_model=None if args.prompt_guard2_model == "none" else args.prompt_guard2_model,
                     use_langgraph=args.use_langgraph,
+                    ml_config=ml_config,
                 )
                 gt_path = seed_path.with_name(seed_path.name.replace("_seed.json", "_ground_truth.json"))
                 ground_truth = load_json(gt_path)
@@ -488,6 +503,7 @@ def main() -> int:
                     "inj_tier1_violations": result["inj_tier1_violations"],
                     "inj_tier2_violations": result["inj_tier2_violations"],
                     "inj_tier3_violations": result["inj_tier3_violations"],
+                    "ml_calibrator": result.get("ml_calibrator", {}),
                 }
                 f.write(json.dumps(row) + "\n")
                 f.flush()

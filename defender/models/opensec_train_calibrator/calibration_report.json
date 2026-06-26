@@ -1,0 +1,36 @@
+{
+  "containment_counts": {
+    "insufficient_evidence": 15342,
+    "sufficient_evidence": 6231
+  },
+  "example_count": 21573,
+  "objective_counts": {
+    "corroborate_containment": 12933,
+    "find_attacker_domain": 1440,
+    "find_data_target": 1440,
+    "find_identity": 1440,
+    "find_patient_zero": 2880,
+    "submit_report": 1440
+  },
+  "scenario_count": 160,
+  "training_status": {
+    "containment_classes": [
+      "insufficient_evidence",
+      "sufficient_evidence"
+    ],
+    "embedding": "embedded",
+    "objective_classes": [
+      "find_identity",
+      "find_patient_zero",
+      "find_attacker_domain",
+      "find_data_target",
+      "corroborate_containment",
+      "submit_report"
+    ],
+    "unsupervised": {
+      "hdbscan": "trained",
+      "isolation_forest": "trained"
+    },
+    "xgboost": "trained"
+  }
+}

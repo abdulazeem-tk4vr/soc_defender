@@ -264,12 +264,17 @@ Validation:
 - `python scripts/train_ml_calibrator.py --examples outputs/ml_training/train_examples_smoke.jsonl --artifact-dir outputs/ml_training/artifact_smoke --train-dir /workspace/opensec-env/data/seeds/train` packaged train-only smoke artifacts.
 - The smoke artifact loaded successfully through `build_agent` with ML enabled.
 - `python -m pytest -q` passed with 65 tests after the second slice.
-- Focused embedding-path tests passed. This environment is missing `sentence-transformers`, `xgboost`, `hdbscan`, `scikit-learn`, and `joblib`, so live SecureBERT2/XGBoost training was not run here.
+- Focused embedding-path tests passed.
+- Full train-only ML artifact was produced under `defender/models/opensec_train_calibrator` from 160 train seeds and 21,573 examples. Training status: SecureBERT2 embeddings embedded, IsolationForest trained, HDBSCAN trained, and XGBoost trained.
+- The trained artifact loads successfully through `build_agent` with `ArtifactMLCalibrator`.
+- `scripts/train_ml_calibrator.py` now emits timestamped progress logs across examples, embedding cache, embedding, unsupervised fitting, XGBoost, and artifact writes.
+- Eval CLI supports `--ml-calibrator` / `--ml-artifact-dir`, and the standard tier alias now includes manifest entries marked `standard`.
+- One-seed train smoke with `evidence_gate_only+ml` passed with reward `2.30` and containment attempted.
 
 Partially implemented or notable limitations:
 
 - Runtime ML scoring uses label-prior and support heuristics unless optional model artifacts are present.
-- SecureBERT2 embedding generation and live XGBoost/HDBSCAN training require installing optional dependencies and downloading the model; code paths are present but not exercised with real packages in this environment.
+- SecureBERT2 embedding generation and live XGBoost/HDBSCAN training are now exercised for the train artifact. Train/eval ablation runs are still pending.
 - Planner integration is intentionally conservative and only uses ML when artifacts load successfully.
 
 ### Regex Injection Scanner
