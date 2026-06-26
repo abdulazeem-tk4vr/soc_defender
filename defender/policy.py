@@ -30,15 +30,18 @@ class DefenderPolicy:
     rag_called: bool = False
     rag_call_step: int | None = None
     episode_summary: dict[str, Any] = field(default_factory=dict)
+    last_evidence_delta: dict[str, Any] = field(default_factory=dict)
+    recent_zero_value_steps: int = 0
+    last_report_decision: dict[str, Any] = field(default_factory=dict)
 
     def next_action(self, observation: dict[str, Any]):
         parsed = parse_observation(observation)
         self.ensure_scenario(parsed)
-        self.registry.update_from_observation(parsed)
-        self.report_tracker.update(self.registry)
-        self._record_failed_query(parsed)
+        self._update_evidence_context(parsed)
 
         if parsed.step_index >= self._report_deadline_step():
+            decision = report_decision(self, parsed)
+            self.last_report_decision = decision.to_dict()
             return submit_report(self.report_tracker.report(parsed.containment))
 
         if self._containment_window_open(parsed.step_index):
@@ -47,6 +50,7 @@ class DefenderPolicy:
                 return containment
 
         decision = report_decision(self, parsed)
+        self.last_report_decision = decision.to_dict()
         if decision.submit:
             return submit_report(self.report_tracker.report(parsed.containment))
 
@@ -81,6 +85,9 @@ class DefenderPolicy:
         self.rag_called = False
         self.rag_call_step = None
         self.episode_summary.clear()
+        self.last_evidence_delta.clear()
+        self.recent_zero_value_steps = 0
+        self.last_report_decision.clear()
         self.current_scenario_id = scenario_id
 
     def _next_unseen_fetch(self, parsed):
@@ -152,6 +159,27 @@ class DefenderPolicy:
                     return action
         return self.sql_planner.action_for_sql(self.sql_planner.next_broad_query(report_gaps))
 
+    def _update_evidence_context(self, parsed) -> None:
+        before_values = dict(self.report_tracker.values)
+        delta = self.registry.update_from_observation(parsed)
+        self.report_tracker.update(self.registry)
+        changed_fields = tuple(
+            sorted(
+                field
+                for field, value in self.report_tracker.values.items()
+                if before_values.get(field) != value
+            )
+        )
+        self.last_evidence_delta = {
+            "new_support_count": delta.new_support_count,
+            "new_entities_by_type": delta.new_entities_by_type,
+            "changed_report_fields": changed_fields,
+        }
+        useful = bool(delta.new_support_count or changed_fields)
+        if parsed.last_action_result.get("message") in {"query_logs", "fetch_email", "fetch_alert"}:
+            self.recent_zero_value_steps = 0 if useful else self.recent_zero_value_steps + 1
+        self._record_failed_query(parsed)
+
     def _record_failed_query(self, parsed) -> None:
         result = parsed.last_action_result or {}
         data = result.get("data") or {}
@@ -160,7 +188,13 @@ class DefenderPolicy:
         rows = data.get("rows") if isinstance(data, dict) else []
         rows_returned = len(rows) if isinstance(rows, list) else 0
         ok = bool(data.get("ok", result.get("ok", True))) if isinstance(data, dict) else bool(result.get("ok", True))
-        self.sql_planner.record_result(self.sql_planner.last_emitted_sql, rows_returned, ok=ok)
+        self.sql_planner.record_result(
+            self.sql_planner.last_emitted_sql,
+            rows_returned,
+            ok=ok,
+            new_support_count=int(self.last_evidence_delta.get("new_support_count") or 0),
+            changed_report_fields=tuple(self.last_evidence_delta.get("changed_report_fields") or ()),
+        )
         if ok is False:
             self.sql_planner.record_failure(self.sql_planner.last_emitted_sql)
 

@@ -124,6 +124,28 @@ def test_graph_returns_action_and_audit_traces():
     ]
 
 
+def test_graph_responder_trace_includes_reward_decision():
+    graph = DefenderGraph(policy=DefenderPolicy(max_steps=15), rag=RAGIntel())
+    action, state = graph.next_action(
+        {
+            "scenario_id": "s-1",
+            "step_index": 8,
+            "new_alerts": [],
+            "containment": {
+                "isolated_hosts": [],
+                "blocked_domains": [],
+                "reset_users": [],
+            },
+            "last_action_result": {"ok": True, "message": "query_logs", "data": {"rows": []}},
+        }
+    )
+
+    responder_trace = state.traces[-1].output_summary
+    assert responder_trace["action"] == action
+    assert "reward_decision" in responder_trace
+    assert "submit" in responder_trace["reward_decision"]
+
+
 def test_full_agentic_agent_keeps_last_graph_state():
     agent = SocDefenderAgent(mode="full_agentic", max_steps=15)
 

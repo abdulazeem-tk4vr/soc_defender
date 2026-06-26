@@ -22,14 +22,25 @@ class SQLPlanner:
     def record_failure(self, sql: str) -> None:
         self.failed_queries.add(sql.strip())
 
-    def record_result(self, sql: str, rows_returned: int, ok: bool = True) -> None:
+    def record_result(
+        self,
+        sql: str,
+        rows_returned: int,
+        ok: bool = True,
+        new_support_count: int = 0,
+        changed_report_fields: tuple[str, ...] = (),
+    ) -> None:
         meta = describe_sql(sql)
+        useful = bool(new_support_count or changed_report_fields)
         self.query_history.append({
             "sql": sql.strip(),
             "entity": meta.get("entity"),
             "log_type": meta.get("log_type"),
             "rows_returned": rows_returned,
             "ok": ok,
+            "new_support_count": new_support_count,
+            "changed_report_fields": tuple(changed_report_fields),
+            "useful": useful,
         })
 
     def compact_history(self, limit: int = 12) -> list[dict[str, Any]]:
