@@ -56,6 +56,99 @@ def test_report_deadline_uses_episode_max_steps():
     assert step_16_action["action_type"] == "submit_report"
 
 
+def test_complete_report_submits_before_fetching_late_unseen_alert():
+    agent = SocDefenderAgent(mode="evidence_gate_only", max_steps=15)
+    agent.policy.report_tracker.values.update(
+        {
+            "patient_zero_host": "h-001",
+            "compromised_user": "u-001",
+            "attacker_domain": "evil.example",
+            "data_target": "t-001",
+        }
+    )
+
+    action = agent.next_action(
+        {
+            "scenario_id": "s-1",
+            "step_index": 8,
+            "new_alerts": ["alert-late"],
+            "new_emails": [],
+            "containment": {
+                "isolated_hosts": ["h-001"],
+                "blocked_domains": ["evil.example"],
+                "reset_users": ["u-001"],
+            },
+            "last_action_result": {"ok": True, "message": "query_logs", "data": {"rows": []}},
+        }
+    )
+
+    assert action["action_type"] == "submit_report"
+
+
+def test_missing_field_keeps_investigating_when_documented_source_untried():
+    agent = SocDefenderAgent(mode="evidence_gate_only", max_steps=15)
+    agent.policy.report_tracker.values.update(
+        {
+            "patient_zero_host": "h-001",
+            "compromised_user": "u-001",
+            "attacker_domain": "evil.example",
+            "data_target": "unknown",
+        }
+    )
+
+    action = agent.next_action(
+        {
+            "scenario_id": "s-1",
+            "step_index": 8,
+            "new_alerts": [],
+            "new_emails": [],
+            "containment": {
+                "isolated_hosts": ["h-001"],
+                "blocked_domains": ["evil.example"],
+                "reset_users": ["u-001"],
+            },
+            "last_action_result": {"ok": True, "message": "query_logs", "data": {"rows": []}},
+        }
+    )
+
+    assert action["action_type"] == "query_logs"
+    assert "process_events" in action["params"]["sql"]
+
+
+def test_missing_field_submits_when_documented_sources_are_exhausted():
+    agent = SocDefenderAgent(mode="evidence_gate_only", max_steps=15)
+    agent.policy.report_tracker.values.update(
+        {
+            "patient_zero_host": "h-001",
+            "compromised_user": "u-001",
+            "attacker_domain": "evil.example",
+            "data_target": "unknown",
+        }
+    )
+    agent.policy.sql_planner.record_result(
+        "SELECT * FROM process_events ORDER BY step DESC LIMIT 20",
+        rows_returned=0,
+        ok=True,
+    )
+
+    action = agent.next_action(
+        {
+            "scenario_id": "s-1",
+            "step_index": 8,
+            "new_alerts": [],
+            "new_emails": [],
+            "containment": {
+                "isolated_hosts": ["h-001"],
+                "blocked_domains": ["evil.example"],
+                "reset_users": ["u-001"],
+            },
+            "last_action_result": {"ok": True, "message": "query_logs", "data": {"rows": []}},
+        }
+    )
+
+    assert action["action_type"] == "submit_report"
+
+
 def test_full_agentic_accepts_mock_llm_client():
     agent = SocDefenderAgent(
         mode="full_agentic",

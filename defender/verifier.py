@@ -34,7 +34,10 @@ def gate_containment(
     supports = tuple(registry.support_for(entity_value, entity_type))
     if not supports:
         return GateDecision(False, "exact entity not observed in evidence")
-    trusted = tuple(s for s in supports if s.trusted and s.content_exposed)
+    content_supports = tuple(s for s in supports if s.content_exposed)
+    if content_supports and all(s.scanner_status in {"flagged", "localized"} or s.localized_spans for s in content_supports):
+        return GateDecision(False, "support only appears in flagged scanner spans")
+    trusted = tuple(s for s in content_supports if s.trusted)
     if not trusted:
         return GateDecision(False, "no trusted content-exposed support")
     malicious = tuple(s for s in trusted if s.malicious_indicators)

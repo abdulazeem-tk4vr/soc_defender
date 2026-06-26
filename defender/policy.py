@@ -7,6 +7,7 @@ from .actions import block_domain, fetch_alert, fetch_email, isolate_host, reset
 from .evidence_registry import EvidenceRegistry
 from .observation import ParsedObservation, parse_observation
 from .report_readiness import ReportReadinessTracker
+from .reward_policy import report_decision
 from .sql_planner import SQLPlanner
 from .verifier import gate_containment
 
@@ -40,17 +41,18 @@ class DefenderPolicy:
         if parsed.step_index >= self._report_deadline_step():
             return submit_report(self.report_tracker.report(parsed.containment))
 
-        action = self._next_unseen_fetch(parsed)
-        if action is not None:
-            return action
-
         if self._containment_window_open(parsed.step_index):
             containment = self._next_gated_containment(parsed.step_index, parsed.containment)
             if containment is not None:
                 return containment
 
-        if parsed.step_index >= self._early_report_step() and self.report_tracker.is_complete():
+        decision = report_decision(self, parsed)
+        if decision.submit:
             return submit_report(self.report_tracker.report(parsed.containment))
+
+        action = self._next_unseen_fetch(parsed)
+        if action is not None:
+            return action
 
         return self._investigate(parsed)
 
