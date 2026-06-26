@@ -108,6 +108,12 @@ def _extract_entities(row: dict[str, Any]) -> list[tuple[str, str, tuple[str, ..
     return [(value, entity_type, tuple(sorted(fields))) for (value, entity_type), fields in values.items()]
 
 
+@dataclass(frozen=True)
+class EvidenceDelta:
+    new_support_count: int = 0
+    new_entities_by_type: dict[str, tuple[str, ...]] = field(default_factory=dict)
+
+
 @dataclass
 class EvidenceRegistry:
     supports: list[EntitySupport] = field(default_factory=list)
@@ -115,13 +121,14 @@ class EvidenceRegistry:
     seen_ids: set[str] = field(default_factory=set)
     scanner: InjectionScanner = field(default_factory=InjectionScanner)
 
-    def update_from_observation(self, observation: Any) -> None:
+    def update_from_observation(self, observation: Any) -> EvidenceDelta:
+        before = len(self.supports)
         self.content_ids.update(getattr(observation, "evidence_content_ids", set()))
         self.seen_ids.update(getattr(observation, "evidence_seen_ids", set()))
         result = getattr(observation, "last_action_result", {}) or {}
         data = result.get("data") or {}
         if not data:
-            return
+            return EvidenceDelta()
         if isinstance(data.get("rows"), list):
             for row in data["rows"]:
                 self.add_row(dict(row), step_seen=observation.step_index)
@@ -133,6 +140,14 @@ class EvidenceRegistry:
             if isinstance(parsed, dict):
                 row.update(parsed)
             self.add_row(row, step_seen=observation.step_index)
+        new_supports = self.supports[before:]
+        entities: dict[str, set[str]] = {}
+        for support in new_supports:
+            entities.setdefault(support.entity_type, set()).add(support.entity_value)
+        return EvidenceDelta(
+            new_support_count=len(new_supports),
+            new_entities_by_type={kind: tuple(sorted(values)) for kind, values in entities.items()},
+        )
 
     def add_row(self, row: dict[str, Any], step_seen: int) -> None:
         table = _source_table(row)
