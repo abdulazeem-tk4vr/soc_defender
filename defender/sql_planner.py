@@ -94,8 +94,8 @@ class SQLPlanner:
         if "attacker_domain" in report_gaps:
             return [
                 "SELECT * FROM netflow ORDER BY step DESC LIMIT 20",
-                "SELECT * FROM alerts ORDER BY step DESC LIMIT 20",
                 "SELECT * FROM email_logs ORDER BY step DESC LIMIT 20",
+                "SELECT * FROM alerts ORDER BY step DESC LIMIT 20",
                 "SELECT * FROM process_events ORDER BY step DESC LIMIT 20",
                 "SELECT * FROM auth_logs ORDER BY step DESC LIMIT 20",
             ]

@@ -7,6 +7,7 @@ from .actions import block_domain, fetch_alert, fetch_email, isolate_host, reset
 from .investigator import InvestigationIntent, VerifierCandidate
 from .observation import ParsedObservation
 from .policy import DefenderPolicy
+from .reward_policy import report_decision
 from .verifier import GateDecision, gate_containment
 
 
@@ -54,6 +55,10 @@ class Responder:
             containment = self.policy._next_gated_containment(parsed.step_index, parsed.containment)
             if containment is not None:
                 return containment, verified
+
+        decision = report_decision(self.policy, parsed)
+        if decision.submit:
+            return submit_report(self.policy.report_tracker.report(parsed.containment)), verified
 
         action = self._action_from_intent(parsed, intent)
         if action is not None:
