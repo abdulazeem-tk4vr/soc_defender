@@ -40,13 +40,9 @@ class Responder:
         verified = self._verify_candidate(parsed, candidate)
 
         if parsed.step_index >= self.policy._report_deadline_step():
-            decision = report_decision(self.policy, parsed)
-            self.policy.last_report_decision = decision.to_dict()
             return submit_report(self.policy.report_tracker.report(parsed.containment)), verified
 
         if verified.action_type == "submit_report" and self.policy.report_tracker.is_complete():
-            decision = report_decision(self.policy, parsed)
-            self.policy.last_report_decision = decision.to_dict()
             return submit_report(self.policy.report_tracker.report(parsed.containment)), verified
 
         report_fill_phase = parsed.step_index >= self.policy._report_deadline_step() - 2
@@ -61,7 +57,6 @@ class Responder:
                 return containment, verified
 
         decision = report_decision(self.policy, parsed)
-        self.policy.last_report_decision = decision.to_dict()
         if decision.submit:
             return submit_report(self.policy.report_tracker.report(parsed.containment)), verified
 
