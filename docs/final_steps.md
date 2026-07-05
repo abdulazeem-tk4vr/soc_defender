@@ -102,116 +102,7 @@ cd /workspace/soc_defender
   --output /workspace/opensec-env/outputs/full_agentic_rag_efficiency.json
 ```
 
-## 6. Run Smart SOC Agent With the Persistent RAG Server
-
-Smart SOC Agent can reuse the same persistent RAG server from step 1. Keep the RAG server terminal running, then run Smart SOC Agent from a separate terminal.
-
-From `/workspace/smart-soc-agent`:
-
-```bash
-cd /workspace/smart-soc-agent
-. /workspace/opensec-env/.venv/bin/activate
-
-export SOC_DEFENDER_RAG_URL=http://127.0.0.1:8765
-export SMART_SOC_RAG_BACKEND=http
-export SMART_SOC_LLM_BACKEND=ollama
-export OLLAMA_BASE_URL=https://<runpod-ollama-host>
-export OLLAMA_MODEL=qwen2.5:7b-instruct
-
-python scripts/run_eval.py \
-  --arms full \
-  --max_steps 25 \
-  --layer alert \
-  --split train \
-  --num_questions 10 \
-  --output_dir final_results/persistent_rag_train \
-  --llm_backend ollama
-```
-
-`SMART_SOC_RAG_BACKEND=http` is required for this persistent-service path. It makes Smart SOC Agent call `SOC_DEFENDER_RAG_URL` instead of trying to open `data/rag/qdrant` inside the eval process.
-
-For a quick wiring check without live evaluator judging:
-
-```bash
-cd /workspace/smart-soc-agent
-. /workspace/opensec-env/.venv/bin/activate
-
-export SOC_DEFENDER_RAG_URL=http://127.0.0.1:8765
-export SMART_SOC_RAG_BACKEND=http
-export SMART_SOC_LLM_BACKEND=ollama
-export OLLAMA_BASE_URL=https://<runpod-ollama-host>
-export OLLAMA_MODEL=qwen2.5:7b-instruct
-
-python scripts/run_eval.py \
-  --arms full \
-  --trial_run \
-  --offline_eval \
-  --max_steps 25 \
-  --layer alert \
-  --split train \
-  --output_dir trial_results/persistent_rag
-```
-
-During these runs, the RAG server terminal should print `POST /retrieve` requests. If it does not, check that both `SOC_DEFENDER_RAG_URL` and `SMART_SOC_RAG_BACKEND=http` are exported in the Smart SOC Agent terminal.
-
-## 7. Smart SOC Agent No-RAG Ablation
-
-For a comparable Smart SOC Agent no-RAG run, use the `B3_gate` arm. It keeps the smart-agent backbone, schema/cache, and answer gate enabled, but does not enable the RAG retriever.
-
-```bash
-cd /workspace/smart-soc-agent
-. /workspace/opensec-env/.venv/bin/activate
-
-unset SOC_DEFENDER_RAG_URL
-unset SMART_SOC_RAG_BACKEND
-export SMART_SOC_LLM_BACKEND=ollama
-export OLLAMA_BASE_URL=https://<runpod-ollama-host>
-export OLLAMA_MODEL=qwen2.5:7b-instruct
-
-python scripts/run_eval.py \
-  --arms B3_gate \
-  --max_steps 25 \
-  --layer alert \
-  --split train \
-  --num_questions 10 \
-  --output_dir final_results/no_rag_train \
-  --llm_backend ollama
-```
-
-To compare all Smart SOC Agent ablations in one run:
-
-```bash
-python scripts/run_eval.py \
-  --arms all \
-  --max_steps 25 \
-  --layer alert \
-  --split train \
-  --num_questions 10 \
-  --output_dir final_results/ablations_train \
-  --llm_backend ollama
-```
-
-## 8. Smart SOC Agent Result Summary
-
-Smart SOC Agent writes JSON files under one directory per arm. Summarize them with:
-
-```bash
-cd /workspace/smart-soc-agent
-. /workspace/opensec-env/.venv/bin/activate
-
-python scripts/analyze_results.py \
-  --input_dir final_results/persistent_rag_train \
-  --output_dir analysis_results/persistent_rag_train
-```
-
-Expected outputs:
-
-- `analysis_results/persistent_rag_train/summary.csv`
-- `analysis_results/persistent_rag_train/per_incident.csv`
-- `analysis_results/persistent_rag_train/episodes.csv`
-- `analysis_results/persistent_rag_train/summary.json`
-
-## 9. Log Expectations
+## 6. Log Expectations
 
 The `--llm-log` file is for LLM/provider responses only:
 
@@ -225,7 +116,7 @@ Non-LLM graph metrics are written to the sibling trace file generated from the L
 
 The full-agentic graph couples the calls to keep volume bounded: the investigator emits a minimal decision payload (`intent_type`, `entity_value`, `confidence`, concrete `evidence_summary`, optional incident-specific `rag_query`), and the verifier emits the action candidate plus compact next-call memory. Verifier memory is limited to concrete `facts`, specific `open_gaps`, and recent `steps_taken`; prompts use that compact memory plus RAG titles/scores instead of repeatedly passing full RAG document text.
 
-## 10. Readiness Checklist
+## 7. Readiness Checklist
 
 Before starting eval:
 
@@ -234,5 +125,3 @@ Before starting eval:
 - Eval terminal has `SOC_DEFENDER_RAG_URL=http://127.0.0.1:8765` exported.
 - Eval is launched from `/workspace/opensec-env`, not from `soc_defender`.
 - `--llm-log` is passed so raw and parsed LLM responses are saved.
-- Smart SOC Agent terminal has both `SOC_DEFENDER_RAG_URL=http://127.0.0.1:8765` and `SMART_SOC_RAG_BACKEND=http` exported.
-- Smart SOC Agent eval is launched from `/workspace/smart-soc-agent`.
