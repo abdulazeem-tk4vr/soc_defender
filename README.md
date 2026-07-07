@@ -1,75 +1,73 @@
 # SOC Defender
 
-Agentic AI SOC defender with evidence-gated response, prompt-injection safeguards,
-RAG/LLM workflows, and OpenSec evaluation tools.
+AI-assisted SOC alert triage and response evaluation platform.
 
-`soc_defender` is a compact agentic AI system for building and evaluating SOC
-incident-response agents. It provides OpenSec-compatible evaluation, configurable
-defender modes, evidence tracking, prompt-injection safeguards, optional RAG and
-LLM-backed workflows, structured reporting, and focused tests for rapid iteration.
+SOC Defender is a production-style cybersecurity automation project for building, testing, and evaluating agentic SOC workflows. It integrates evidence-gated response logic, optional RAG, LLM-backed defender modes, prompt-injection safeguards, and OpenSec-compatible evaluation tooling so security agents can be measured against repeatable incident-response scenarios.
 
-The project is designed for repeatable experiments: run deterministic baselines,
-compare agentic variants, inspect failures, and measure whether defensive actions
-are grounded in trustworthy evidence.
+The project is designed around a practical SOC problem: alerts are noisy, context is scattered across logs and security documentation, and autonomous agents must not take containment actions unless their decisions are grounded in trustworthy evidence.
 
-<img src="docs/new-diagram.png" alt="soc_defender architecture" width="900">
+## What It Demonstrates
+
+- Agentic SOC workflow design for alert triage, evidence collection, and response planning
+- Evidence-gated containment policies that prevent unsupported or unsafe actions
+- RAG-ready security context retrieval for grounded analyst decisions
+- Prompt-injection and tool-misuse safeguards for autonomous security agents
+- Reproducible evaluation scripts, JSONL outputs, summaries, and failure analysis
+- Test coverage for agent behavior, policies, report readiness, RAG builds, and classifiers
+
+## Architecture
+
+```text
+OpenSec scenario
+      |
+      v
+Defender mode selection
+      |
+      +-- baseline
+      +-- evidence_gate_only
+      +-- full_agentic
+              |
+              +-- agent graph
+              +-- verifier
+              +-- responder
+              +-- optional RAG
+              +-- optional LLM backend
+      |
+      v
+Evidence-gated action/report
+      |
+      v
+JSONL evaluation output + rollup summary + failure analysis
+```
+
+The core implementation lives under `defender/`, with evaluation and analysis utilities under `scripts/`.
+
+## Defender Modes
+
+| Mode | Purpose |
+|---|---|
+| `baseline` | OpenSec-compatible baseline flow |
+| `evidence_gate_only` | Deterministic defender for fast local checks and policy testing |
+| `full_agentic` | Agentic verifier/responder workflow with optional RAG and LLM calls |
 
 ## Quick Start
 
 ```powershell
-cd C:\Relevant\OMSCS\AI_8903\soc-attack\soc-benchmarks\soc_defender
 py -m pip install -e ".[dev]"
 py -m pytest -q
 ```
 
-Run a small deterministic smoke eval:
+Run a deterministic smoke evaluation:
 
 ```powershell
 py scripts\eval.py --defender evidence_gate_only --no-rag --split train --limit 5 --output outputs\smoke.jsonl --summary outputs\smoke_summary.json
 ```
 
-The eval script expects the OpenSec checkout at `..\opensec-env` by default. Use
-`--opensec-root path\to\opensec-env` if yours lives elsewhere.
+The eval script expects an OpenSec checkout at `..\opensec-env` by default. Use `--opensec-root path\to\opensec-env` if your checkout lives elsewhere.
 
-## Tests
+## RAG and Security Context
 
-```powershell
-# Full test suite
-py -m pytest -q
-
-# Focused checks
-py -m pytest tests\test_agent.py -q
-py -m pytest tests\test_policy.py tests\test_report_readiness.py -q
-py -m pytest tests\test_rag_build.py tests\test_regex_classifier.py -q
-
-# Syntax check core package and scripts
-py -m compileall -q defender scripts
-```
-
-## Defender Modes
-
-
-| Mode                 | Use                                                                  |
-| -------------------- | -------------------------------------------------------------------- |
-| `baseline`           | Original OpenSec baseline flow.                                      |
-| `evidence_gate_only` | Deterministic evidence-gated defender; best for fast local checks.   |
-| `full_agentic`       | Agentic graph with verifier/responder flow, optional Ollama and RAG. |
-
-
-Example agentic run with a remote Ollama-compatible backend:
-
-```powershell
-Copy-Item .env.example .env
-# Edit .env with OLLAMA_BASE_URL and OLLAMA_MODEL
-py scripts\eval.py --defender full_agentic --agent-llm ollama --split train --limit 5 --no-rag
-```
-
-## RAG
-
-RAG is optional. A local Qdrant index can be supplied with `--rag-path`, or disabled
-with `--no-rag` for repeatable local experiments.
-
-Useful build commands:
+RAG is optional and can be disabled with `--no-rag` for deterministic experiments. To build local retrieval data:
 
 ```powershell
 py scripts\fetch_rag_corpora.py
@@ -77,25 +75,37 @@ py scripts\build_rag_chunks.py
 py scripts\build_qdrant_index.py --chunks data\rag\chunks.jsonl --device cpu
 ```
 
-## Project Layout
-
-
-| Path        | Purpose                                                      |
-| ----------- | ------------------------------------------------------------ |
-| `defender/` | Agent, graph, policy, verifier, scanner, RAG, and LLM code.  |
-| `scripts/`  | Eval, summarization, RAG build, and analysis utilities.      |
-| `configs/`  | Defender, calibration, and prompt-injection regex config.    |
-| `tests/`    | Focused pytest coverage for defender behavior.               |
-| `docs/`     | Implementation notes, baseline parity, and deployment notes. |
-| `outputs/`  | Local eval outputs and summaries.                            |
-
-
-## Common Commands
+## Evaluation and Debugging
 
 ```powershell
 py scripts\summarize.py outputs\smoke.jsonl --output outputs\smoke_rollup.json
 py scripts\analyze_failures.py outputs\smoke.jsonl
 ```
 
-For current implementation status and benchmark notes, see
-`docs\progress.md` and `docs\baseline_parity.md`.
+Focused test runs:
+
+```powershell
+py -m pytest tests\test_agent.py -q
+py -m pytest tests\test_policy.py tests\test_report_readiness.py -q
+py -m pytest tests\test_rag_build.py tests\test_regex_classifier.py -q
+py -m compileall -q defender scripts
+```
+
+## Project Layout
+
+| Path | Purpose |
+|---|---|
+| `defender/` | Agent, graph, policy, verifier, scanner, RAG, and LLM code |
+| `scripts/` | Evaluation, summarization, RAG build, and failure analysis utilities |
+| `configs/` | Defender, calibration, and prompt-injection regex configuration |
+| `tests/` | Focused pytest coverage for defender behavior |
+| `docs/` | Implementation notes, benchmark notes, and deployment documentation |
+| `outputs/` | Local evaluation outputs and summaries |
+
+## Why This Is Non-Trivial
+
+This is not a CRUD app or a prompt wrapper. The system separates evidence collection, verification, policy gating, response generation, and evaluation so that SOC actions can be tested for correctness, grounding, and robustness under adversarial conditions.
+
+## Status
+
+See `docs\progress.md` and `docs\baseline_parity.md` for implementation notes and benchmark status.
