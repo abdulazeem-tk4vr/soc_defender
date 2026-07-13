@@ -72,7 +72,7 @@ class Investigator:
         episode_summary: dict[str, Any] | None = None,
     ) -> InvestigationIntent:
         if self.llm is None:
-            return self._deterministic_intent(registry, report_tracker)
+            return self._rule_based_intent(registry, report_tracker)
         try:
             response = self.llm.complete_json(
                 [
@@ -100,7 +100,7 @@ class Investigator:
             )
             return self._intent_from_response(response)
         except Exception:
-            return self._deterministic_intent(registry, report_tracker)
+            return self._rule_based_intent(registry, report_tracker)
 
     @staticmethod
     def _intent_from_response(response: dict[str, Any]) -> InvestigationIntent:
@@ -122,7 +122,7 @@ class Investigator:
         )
 
     @staticmethod
-    def _deterministic_intent(registry: EvidenceRegistry, report_tracker: ReportReadinessTracker) -> InvestigationIntent:
+    def _rule_based_intent(registry: EvidenceRegistry, report_tracker: ReportReadinessTracker) -> InvestigationIntent:
         if report_tracker.values.get("data_target") == "unknown":
             for host in registry.best_entities("host"):
                 return InvestigationIntent("query_logs", "host", host, "Find process/data access evidence.", 0.5)

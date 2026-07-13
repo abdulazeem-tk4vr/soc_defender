@@ -269,7 +269,7 @@ Acceptance criteria:
 
 ## Phase 8: Fine-Tuning / Model-Assisted Scoring
 
-Goal: use train data to improve extraction and calibration after deterministic logic is stable.
+Goal: use train data to improve extraction and calibration after rule-based logic is stable.
 
 TODO:
 

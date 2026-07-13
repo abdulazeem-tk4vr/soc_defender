@@ -8,7 +8,11 @@ agent modes, evidence tracking, evidence-gated response logic, optional RAG and
 LLM-backed workflows, prompt-injection safeguards, structured reporting, and
 focused tests for repeatable incident-response evaluation.
 
-The project is designed around a practical SOC problem: alerts are noisy, context is scattered across logs and security documentation, and autonomous agents must not take containment actions unless their decisions are grounded in trustworthy evidence.
+The project addresses a practical SOC problem: alerts are noisy, context is
+scattered across logs and security documentation, and autonomous agents must not
+take containment actions unless their decisions are grounded in trustworthy
+evidence. It supports repeatable experiments, reproducible baselines, agentic
+variant comparisons, and failure analysis.
 
 ## What It Demonstrates
 
@@ -51,7 +55,7 @@ The core implementation lives under `defender/`, with evaluation and analysis ut
 | Mode | Purpose |
 |---|---|
 | `baseline` | OpenSec-compatible baseline flow |
-| `evidence_gate_only` | Deterministic defender for fast local checks and policy testing |
+| `evidence_gate_only` | Rule-based, evidence-gated defender for fast local checks and policy testing |
 | `full_agentic` | Agentic verifier/responder workflow with optional RAG and LLM calls |
 
 ## Quick Start

@@ -22,7 +22,7 @@ _INJECTION_MARKERS = (
 @dataclass(frozen=True)
 class RAGQueryPlan:
     query: str
-    source: str = "deterministic"
+    source: str = "rule_based"
     rationale: str = ""
 
 
@@ -36,9 +36,9 @@ class RAGQueryPlanner:
         registry: EvidenceRegistry,
         report_tracker: ReportReadinessTracker,
     ) -> RAGQueryPlan:
-        fallback = self._deterministic_query(observation, registry, report_tracker)
+        fallback = self._rule_based_query(observation, registry, report_tracker)
         if self.llm is None:
-            return RAGQueryPlan(fallback, source="deterministic", rationale="no llm configured")
+            return RAGQueryPlan(fallback, source="rule_based", rationale="no llm configured")
         try:
             response = self.llm.complete_json(
                 [
@@ -56,13 +56,13 @@ class RAGQueryPlanner:
             )
             query = self._clean_query(str(response.get("query") or ""))
             if not query:
-                return RAGQueryPlan(fallback, source="deterministic", rationale="llm query rejected")
+                return RAGQueryPlan(fallback, source="rule_based", rationale="llm query rejected")
             return RAGQueryPlan(query, source="llm", rationale=str(response.get("rationale") or ""))
         except Exception:
-            return RAGQueryPlan(fallback, source="deterministic", rationale="llm query failed")
+            return RAGQueryPlan(fallback, source="rule_based", rationale="llm query failed")
 
     @staticmethod
-    def _deterministic_query(
+    def _rule_based_query(
         observation: dict[str, Any],
         registry: EvidenceRegistry,
         report_tracker: ReportReadinessTracker,

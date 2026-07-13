@@ -77,7 +77,7 @@ Responsibilities:
 - Enforce the EGAR gate.
 - Check kill-chain coherence and action/entity alignment.
 - Use a verifier LLM in the full-agentic system.
-- Keep deterministic evidence gates authoritative over LLM output.
+- Keep evidence-based safety gates authoritative over LLM output.
 
 The verifier owns final-action candidacy. If containment is rejected, the path routes to one targeted investigation action, not an unsafe containment action.
 
@@ -184,7 +184,7 @@ Implementation responsibilities:
 
 Diagram coverage:
 
-- Implements the deterministic action serialization foundation for D.
+- Implements the rule-based action serialization foundation for D.
 - Gives B/B2/C safe investigation fallbacks when containment is blocked.
 
 ### Phase 4: Evidence Gate And 15-Step Budget `[MVP required]`
@@ -202,7 +202,7 @@ Implementation responsibilities:
 Diagram coverage:
 
 - Implements B2.
-- Implements the deterministic core of C.
+- Implements the rule-based core of C.
 - Protects D from committing unsupported containment.
 
 ### Phase 5: Report Readiness And `evidence_gate_only` Policy `[MVP required]`
@@ -263,7 +263,7 @@ Implementation responsibilities:
 - Connect to RunPod Ollama via `OLLAMA_BASE_URL`.
 - Support investigator and verifier structured outputs.
 - Mock LLM calls in unit tests.
-- Keep live LLM use out of deterministic unit tests.
+- Keep live LLM use out of repeatable unit tests.
 
 Ollama on RunPod is the required LLM backend for now.
 
@@ -317,7 +317,7 @@ Implementation responsibilities:
 
 - Keep Ollama on RunPod as the required LLM backend.
 - Add LangChain only if the project needs provider switching or LangChain-native structured-output/retriever adapters.
-- Do not make LangChain a dependency of deterministic evidence gating.
+- Do not make LangChain a dependency of evidence-based safety gating.
 - Do not expose OpenSec mutating actions directly as LLM tools.
 
 Diagram coverage:
@@ -335,7 +335,7 @@ Implementation responsibilities:
 - Implement nodes for scanner, evidence registry, RAG, investigator LLM, step budget, verifier LLM, evidence gate, responder, and OpenSec commit.
 - Route graph flow as scanner -> registry -> RAG -> investigator -> step budget -> verifier -> evidence gate -> responder -> OpenSec commit.
 - Only the OpenSec commit node may call `env.step()`.
-- Keep deterministic gates authoritative over LLM output.
+- Keep policy-enforced gates authoritative over LLM output.
 - Route rejected or insufficient-evidence paths back to targeted investigation.
 - Persist node traces and full OpenSec commit responses for replayable failure analysis.
 

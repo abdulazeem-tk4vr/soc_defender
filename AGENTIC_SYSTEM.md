@@ -21,7 +21,7 @@ The system is designed around three constraints:
 
 There are two main operating modes:
 
-- `evidence_gate_only`: deterministic evidence-gated policy.
+- `evidence_gate_only`: rule-based, evidence-gated policy.
 - `full_agentic`: graph-based system that adds scanner, registry, budget, investigator, RAG, verifier, and responder nodes.
 
 ## 2. High-level architecture
@@ -111,7 +111,7 @@ Implemented in `defender/agent.py`.
 
 `build_agent` builds the runtime agent:
 
-- `agent_llm="none"` creates a deterministic agent with no internal LLM calls.
+- `agent_llm="none"` creates a rule-based agent with no internal LLM calls.
 - `agent_llm="ollama"` creates an `OllamaLLMClient` from environment variables.
 - `mode="evidence_gate_only"` uses only `DefenderPolicy`.
 - `mode="full_agentic"` builds a `DefenderGraph`.
@@ -164,11 +164,11 @@ Implemented in `defender/observation.py`.
 
 The parser also handles Pydantic-like objects by calling `model_dump` where needed. This keeps the policy and graph independent from exact OpenSec model classes.
 
-## 6. Deterministic policy mode
+## 6. Rule-based policy mode
 
 Implemented in `defender/policy.py`.
 
-`DefenderPolicy.next_action` is the deterministic backbone. It also remains the shared state manager in `full_agentic` mode.
+`DefenderPolicy.next_action` is the policy-enforcement backbone. It also remains the shared state manager in `full_agentic` mode.
 
 Decision order:
 
@@ -220,7 +220,7 @@ flowchart TD
 
 ### 6.2 Fetch priority
 
-The deterministic policy fetches unseen alerts before unseen emails:
+The rule-based policy fetches unseen alerts before unseen emails:
 
 - Alerts often contain parsed incident hints and severity context.
 - Emails can contain prompt-injection payloads, so they are still fetched but then scanned and registered as evidence.
@@ -566,7 +566,7 @@ The investigator produces `InvestigationIntent`:
 - `uncertainty`
 - `rag_query`
 
-If no LLM is configured, the deterministic fallback:
+If no LLM is configured, the rule-based fallback:
 
 - Queries host evidence when `data_target` is unknown and hosts are known.
 - Queries domain evidence when `attacker_domain` is unknown and domains are known.
@@ -648,7 +648,7 @@ Responder priority:
 2. Submit report if the deadline has arrived.
 3. Submit report if verifier requested it and report fields are complete.
 4. Execute approved containment if not in report-fill phase.
-5. Try deterministic gated containment if the window is open.
+5. Try policy-enforced gated containment if the window is open.
 6. Use reward-aware `report_decision`.
 7. Convert investigator intent into a fetch or query action.
 8. Fetch unseen evidence if available.
@@ -860,7 +860,7 @@ Implemented in `defender/rag_query.py`.
 - Evidence registry
 - Report tracker
 
-If no LLM is configured, it uses deterministic query construction based on:
+If no LLM is configured, it uses rule-based query construction based on:
 
 - Attacker state
 - Unknown report fields
@@ -974,7 +974,7 @@ Inputs include:
 - Scanner annotations
 - Budget
 
-If no LLM is configured, it produces a deterministic summary. If an LLM call fails, it falls back to deterministic summary.
+If no LLM is configured, it produces a rule-based summary. If an LLM call fails, it falls back to the rule-based summary.
 
 Current graph behavior:
 
@@ -1218,7 +1218,7 @@ sequenceDiagram
 
 ## 24. Important limitations and implementation notes
 
-- `evidence_gate_only` is deterministic and does not use RAG or internal LLM calls.
+- `evidence_gate_only` is rule-based and does not use RAG or internal LLM calls.
 - `full_agentic` still relies on `DefenderPolicy` as the stateful safety backbone.
 - The graph is linear, not dynamically branched.
 - The LangGraph adapter wraps the same node methods; it does not change semantics.
@@ -1235,7 +1235,7 @@ Core runtime:
 
 - `defender/agent.py`: top-level agent and builder.
 - `defender/actions.py`: action constructors, validation, report normalization, SQL allowlist.
-- `defender/policy.py`: deterministic evidence-gated policy and shared episode state.
+- `defender/policy.py`: rule-based, evidence-gated policy and shared episode state.
 - `defender/graph.py`: full agentic linear graph.
 - `defender/graph_state.py`: graph state and traces.
 - `defender/langgraph_adapter.py`: optional LangGraph wrapper.
@@ -1252,7 +1252,7 @@ Evidence and reporting:
 
 Agentic/LLM:
 
-- `defender/investigator.py`: investigator and verifier prompts, deterministic fallbacks.
+- `defender/investigator.py`: investigator and verifier prompts, rule-based fallbacks.
 - `defender/llm.py`: LLM protocol, Ollama client, JSON extraction, traces.
 - `defender/episode_summary.py`: compact episode memory.
 
@@ -1296,7 +1296,7 @@ What it is:
 
 - The top-level agent object exposed to the evaluation harness.
 - The object that receives an OpenSec observation and returns an action payload.
-- The mode switch between deterministic and full agentic behavior.
+- The mode switch between rule-based and full agentic behavior.
 
 State it carries:
 
@@ -1317,14 +1317,14 @@ What it does:
 - In `full_agentic`, builds `InjectionScanner`, `RAGIntel`, `Investigator`, `LLMVerifier`, and `DefenderGraph`.
 - On every `act`, checks whether the scenario changed and resets state if needed.
 - Delegates to `DefenderGraph.next_action` in graph mode.
-- Delegates to `DefenderPolicy.next_action` in deterministic mode.
+- Delegates to `DefenderPolicy.next_action` in rule-based mode.
 - Serializes the selected action to a dictionary.
 - Appends structured trace records to `SOC_DEFENDER_TRACE_LOG` if configured.
 
 Why it matters:
 
 - This is the stable integration point for OpenSec.
-- It hides whether the implementation is deterministic, graph-based, or LangGraph-backed.
+- It hides whether the implementation is rule-based, graph-based, or LangGraph-backed.
 
 ```mermaid
 flowchart TD
@@ -1477,8 +1477,8 @@ Source: `defender/policy.py`
 
 What it is:
 
-- The deterministic policy engine.
-- The shared state backbone used by both deterministic and full graph modes.
+- The rule-based policy engine.
+- The policy-enforcement backbone used by both rule-based and full graph modes.
 
 State it carries:
 
@@ -1506,12 +1506,12 @@ What it does:
 - Updates report field readiness.
 - Records SQL failures and zero-row query outcomes.
 - Decides when to fetch, query, contain, or submit.
-- Enforces deterministic containment gating.
+- Enforces evidence-based containment gating.
 - Provides known entities and compact query history to graph nodes.
 
 Important methods:
 
-- `next_action`: full deterministic decision loop.
+- `next_action`: full rule-based decision loop.
 - `ensure_scenario`: detects scenario changes.
 - `reset_episode_state`: clears all per-episode memory.
 - `_next_unseen_fetch`: fetches unseen alerts before unseen emails.
@@ -1558,19 +1558,19 @@ Node methods:
 - `_scanner_node`: scans latest evidence text for prompt-injection indicators.
 - `_registry_node`: updates evidence registry and report readiness.
 - `_budget_node`: computes current step phase.
-- `_investigator_node`: asks deterministic or LLM investigator for next intent.
+- `_investigator_node`: asks a rule-based or LLM investigator for the next intent.
 - `_ground_intent`: rejects ungrounded query entities.
 - `_rag_node`: retrieves or reuses RAG context once per episode.
-- `_verifier_node`: asks deterministic or LLM verifier for a candidate.
+- `_verifier_node`: asks a rule-based or LLM verifier for a candidate.
 - `_responder_node`: converts candidate and intent into final safe action.
 
-What it adds over deterministic policy:
+What it adds over rule-based policy:
 
 - Explicit per-step traceability.
 - Optional LLM investigation planning.
 - Optional LLM verification.
 - RAG context injection with caching.
-- A responder layer that arbitrates between LLM suggestions and deterministic safety.
+- A responder layer that arbitrates between LLM suggestions and policy-enforced safety controls.
 
 ### 26.10 `DefenderGraphState`
 
@@ -1934,7 +1934,7 @@ State it carries:
 
 What it does:
 
-- If no LLM exists, emits deterministic intents from report gaps and known entities.
+- If no LLM exists, emits rule-based intents from report gaps and known entities.
 - If an LLM exists, sends a compact incident state summary and expects JSON.
 - Cleans and validates the LLM response into `InvestigationIntent`.
 - Prevents unsafe RAG queries by rejecting SQL and prompt-injection markers.
@@ -2042,11 +2042,11 @@ What it does:
 - Enforces report deadline.
 - Executes submit report only when complete or deadline requires it.
 - Executes approved containment when not in report-fill phase.
-- Falls back to deterministic gated containment.
+- Falls back to evidence-based gated containment.
 - Applies reward-aware report decision.
 - Converts investigation intents into fetch/query actions.
 - Falls back to unseen evidence fetch.
-- Falls back to deterministic policy investigation.
+- Falls back to rule-based policy investigation.
 
 Why it matters:
 
@@ -2161,7 +2161,7 @@ What it does:
 
 - Builds a payload from report values, known entities, recent actions, supports, RAG, scanner annotations, and budget.
 - If an LLM exists, asks for compact JSON memory.
-- If no LLM exists or the call fails, returns deterministic summary.
+- If no LLM exists or the call fails, returns a rule-based summary.
 - Avoids copying raw email, alert, log, prompt, or RAG document text.
 
 Why it matters:
@@ -2189,7 +2189,7 @@ What they do:
 
 Why they matter:
 
-- This is the deterministic first layer of injection detection.
+- This is the rule-based first layer of injection detection.
 
 ### 26.35 `PromptGuardResult`
 
@@ -2478,7 +2478,7 @@ State it carries:
 
 What it does:
 
-- Records whether the query came from deterministic logic or LLM planning.
+- Records whether the query came from rule-based logic or LLM planning.
 
 ### 26.50 `RAGQueryPlanner`
 
@@ -2494,7 +2494,7 @@ State it carries:
 
 What it does:
 
-- Builds deterministic incident-specific retrieval queries from report gaps and known entities.
+- Builds rule-based incident-specific retrieval queries from report gaps and known entities.
 - Optionally asks an LLM for a concise security retrieval query.
 - Rejects queries containing SQL or prompt-injection markers.
 - Caps query length to 300 characters.
@@ -2924,7 +2924,7 @@ flowchart TD
     Decision -->|no| Fallback["Continue investigation/report logic"]
 ```
 
-### 27.11 Deterministic policy containment gate
+### 27.11 Rule-based policy containment gate
 
 In `evidence_gate_only` mode, containment is attempted by `_next_gated_containment`.
 
@@ -3103,7 +3103,7 @@ Defensive pattern:
 - Suspicious spans are marked.
 - Entities from untrusted or injected content are not enough for containment.
 - LLM prompts explicitly say evidence instructions must be treated as data.
-- Final action still goes through deterministic gate checks.
+- Final action still goes through evidence-based gate checks.
 
 This is important because prompt injection can try to produce direct action instructions like:
 
@@ -3158,6 +3158,6 @@ The system is best understood as an evidence-first controller:
 - The report tracker converts those supports into report fields.
 - The SQL planner searches for missing fields without repeating bad queries.
 - The containment gate prevents irreversible actions unless exact evidence supports them.
-- The full graph adds LLM planning and RAG, but the responder and policy still enforce deterministic safety constraints.
+- The full graph adds LLM planning and RAG, but the responder and policy still enforce policy-based safety constraints.
 
 The critical design point is that LLMs can suggest investigation direction or candidate actions, but they do not directly control containment or report structure. Final actions pass through grounding, report readiness, SQL safety, and containment gates.

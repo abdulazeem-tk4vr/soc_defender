@@ -87,7 +87,7 @@
   <!-- Row C: gate and responder -->
   <rect x="295" y="790" width="420" height="126" rx="6" class="box"/>
   <text x="505" y="822" text-anchor="middle" class="section">G. Evidence Gate</text>
-  <text x="505" y="852" text-anchor="middle" class="label">deterministic EGAR + schema + action/entity checks</text>
+  <text x="505" y="852" text-anchor="middle" class="label">policy-enforced EGAR + schema + action/entity checks</text>
   <text x="505" y="880" text-anchor="middle" class="small">rejects unsafe candidates; preserves exact support records</text>
 
   <rect x="885" y="790" width="420" height="126" rx="6" class="dark"/>

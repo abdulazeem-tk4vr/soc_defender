@@ -161,7 +161,7 @@ Use the **same** `OLLAMA_BASE_URL` and `OLLAMA_MODEL` for comparable runs. Run f
 ```bash
 cd ../opensec-env
 
-# Agentic without RAG, deterministic internal logic.
+# Agentic without RAG, rule-based internal logic.
 python scripts/eval.py \
   --config configs/soc_defender_ablations.yaml \
   --models full_agentic_no_llm \

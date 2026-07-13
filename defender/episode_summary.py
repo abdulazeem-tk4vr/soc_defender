@@ -80,7 +80,7 @@ class EpisodeSummarizer:
             "budget": budget_state or {},
         }
         if self.llm is None:
-            return self._deterministic_summary(payload)
+            return self._rule_based_summary(payload)
         try:
             response = self.llm.complete_json(
                 [
@@ -106,7 +106,7 @@ class EpisodeSummarizer:
             )
             return self._clean_response(response, fallback=payload)
         except Exception:
-            return self._deterministic_summary(payload)
+            return self._rule_based_summary(payload)
 
     @staticmethod
     def _clean_response(response: dict[str, Any], fallback: dict[str, Any]) -> dict[str, Any]:
@@ -122,7 +122,7 @@ class EpisodeSummarizer:
         }
 
     @staticmethod
-    def _deterministic_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    def _rule_based_summary(payload: dict[str, Any]) -> dict[str, Any]:
         report_values = payload.get("report_values") or {}
         gaps = [key for key, value in report_values.items() if value == "unknown"]
         actions = [str(item.get("action_type")) for item in payload.get("recent_actions") or [] if item.get("action_type")]

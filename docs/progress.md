@@ -6,9 +6,9 @@ This document summarizes what has been implemented in `soc_defender`, what has b
 
 ## Current State
 
-The repository contains a deterministic MVP defender mode named `evidence_gate_only` and a wired `full_agentic` mode. Both are available through the local OpenSec-compatible eval harness.
+The repository contains a rule-based MVP defender mode named `evidence_gate_only` and a wired `full_agentic` mode. Both are available through the local OpenSec-compatible eval harness.
 
-The full-agentic path now updates the evidence registry and report tracker before LLM calls, feeds RAG context, scanner annotations, budget state, and registry entities into investigator/verifier prompts, calls the investigator once per step, and emits committed actions through a verifier-to-responder path. Deterministic EGAR containment gates remain authoritative; gate rejection falls back to investigation/fetch/report actions.
+The full-agentic path now updates the evidence registry and report tracker before LLM calls, feeds RAG context, scanner annotations, budget state, and registry entities into investigator/verifier prompts, calls the investigator once per step, and emits committed actions through a verifier-to-responder path. Policy-enforced EGAR containment gates remain authoritative; gate rejection falls back to investigation/fetch/report actions.
 
 The implemented system includes Regex scanner Layer 1, Prompt Guard fallback, Prompt Guard 2 with 22M fallback/windowing, LLM localization hooks, RAG interface, Ollama-compatible LLM adapter, investigator/verifier contracts, graph-state tracing, a plain-Python graph, and an optional LangGraph adapter behind `--use-langgraph`. LangChain provider switching remains explicitly deferred.
 
@@ -96,7 +96,7 @@ Implemented:
 - Supports the expected OpenSec evidence sources: `email_logs`, `auth_logs`, `netflow`, `process_events`, and `alerts`.
 - Tracks whether evidence content was exposed.
 - Carries trust tier, source, injection ID, evidence ID, source table, fields, and malicious indicators.
-- Identifies malicious indicators from a small deterministic keyword set.
+- Identifies malicious indicators from a small fixed keyword set.
 - Provides `support_for()` and `best_entities()` helpers for policy and report readiness.
 - Runs the regex injection scanner on evidence rows and stores `scanner_status` on each support record.
 - Stores localized scanner spans on support records.
@@ -139,7 +139,7 @@ Relevant files:
 
 Implemented:
 
-- Deterministic containment gate in `defender/verifier.py`.
+- Evidence-based containment gate in `defender/verifier.py`.
 - Enforces containment action/entity alignment:
   - `isolate_host` requires host support.
   - `block_domain` requires domain support.
@@ -280,7 +280,7 @@ Relevant files:
 Implemented:
 
 - Ollama/OpenAI-compatible JSON client in `defender/llm.py`.
-- Mockable `StaticJSONLLMClient` for deterministic tests.
+- Mockable `StaticJSONLLMClient` for repeatable tests.
 - Structured `Investigator` and `LLMVerifier` contracts in `defender/investigator.py`.
 - RAG retriever interface plus builtin keyword fallback in `defender/rag.py`.
 - Graph audit state in `defender/graph_state.py`.
@@ -294,7 +294,7 @@ Partially implemented or notable limitations:
 
 - The graph scaffold returns one action and audit state; eval remains responsible for `env.step()`.
 - The LangGraph adapter is optional and only runs when `langgraph` is installed and explicitly selected.
-- Live Ollama calls require `OLLAMA_BASE_URL` and are not used in deterministic tests.
+- Live Ollama calls require `OLLAMA_BASE_URL` and are not used in repeatable tests.
 - Qdrant retrieval is implemented behind lazy imports and requires a runtime embedder plus a built local collection.
 - Qdrant build supports both Hugging Face `transformers` mean-pooling embeddings and `sentence-transformers` embeddings. Preferred RunPod RAG model is `cisco-ai/SecureBERT2.0-biencoder` because it is a cybersecurity sentence-similarity/document-embedding model suited to semantic retrieval.
 - RAG chunk build utilities and RunPod workflow documentation exist.
@@ -302,7 +302,7 @@ Partially implemented or notable limitations:
 - Current `data/rag/chunks.jsonl` has 41,722 chunks.
 - Eval JSONL rows now include compact graph traces for `full_agentic` runs.
 - Graph traces now include RAG top-document metadata, investigation intent, verifier candidate, gate decision/responder details, and final responder action.
-- LLM clients record raw/parsed traces and investigator/verifier fall back deterministically on malformed LLM output.
+- LLM clients record raw/parsed traces and investigator/verifier use rule-based fallbacks for malformed LLM output.
 
 Relevant files:
 
@@ -373,7 +373,7 @@ Git status note:
 | Phase 1: Eval Harness And Baseline Parity | Mostly complete | Local harness, `evidence_gate_only`, `full_agentic`, Ollama baseline mode, RAG ablation flag, and baseline parity doc exist. Fresh post-change full-agentic comparison is pending. |
 | Phase 2: Observation Parser And Evidence Registry | Mostly complete | Parser and registry exist. Extraction is heuristic; support ranking and scanner span propagation are implemented. |
 | Phase 3: Action Adapter And SQL Planner | Mostly complete | Central constructors, validation, SQL safety, and planner exist. Harness fallback still allows `SELECT 1` for malformed baseline actions. |
-| Phase 4: Evidence Gate And 15-Step Budget | Mostly complete | Deterministic gate, scanner-span rejection, step-aware policy, and budget module exist. |
+| Phase 4: Evidence Gate And 15-Step Budget | Mostly complete | Evidence-based gate, scanner-span rejection, step-aware policy, and budget module exist. |
 | Phase 5: Report Readiness And `evidence_gate_only` Policy | Mostly complete | Policy is integrated and runs end-to-end. Ranked support is used for report readiness; domain/data-target attribution still needs tuning. |
 | Phase 6: Failure Analysis And Calibration | Partially complete | Failure analyzer exists and train standard40 has been run/analyzed. Calibration thresholds are not frozen. |
 | Phase 7: Regex Injection Scanner | Mostly complete | Regex classifier, scanner wrapper, registry annotations, tests, eval helper, and train-set builder exist. Prompt Guard 2 and localization are connected in `full_agentic`. |
@@ -405,6 +405,6 @@ Full-agentic work still pending:
 
 - Current report attribution can look complete while still being semantically wrong.
 - Domain extraction and entity ranking are safer now, but train standard40 still shows 18 `attacker_domain` gaps and 31 `data_target` gaps.
-- The deterministic train standard40 run has low injection violation rate and no low-EGAR runs, but 9 false-positive containment runs remain.
-- The local RAG manifest can request CUDA; use `--no-rag` for deterministic MVP runs on CPU-only Torch or rebuild/update the manifest for CPU.
+- The rule-based train standard40 run has low injection violation rate and no low-EGAR runs, but 9 false-positive containment runs remain.
+- The local RAG manifest can request CUDA; use `--no-rag` for rule-based MVP runs on CPU-only Torch or rebuild/update the manifest for CPU.
 - LLM/RAG/graph interfaces exist and are wired, but live full-agentic model behavior still needs fresh post-change eval evidence.

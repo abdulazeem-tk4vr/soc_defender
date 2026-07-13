@@ -12,13 +12,13 @@ Baseline command shape:
 py -3.13 scripts\eval.py --defender baseline --ollama --ollama-model qwen2.5:14b --split eval --tier standard --limit 40 --output outputs\qwen25_14b_baseline_standard40.jsonl --summary outputs\qwen25_14b_baseline_standard40_summary.json
 ```
 
-Local deterministic calibration command:
+Local rule-based calibration command:
 
 ```powershell
 py -3.13 scripts\eval.py --defender evidence_gate_only --no-rag --split train --tier standard --limit 40 --output outputs\evidence_gate_train_standard40.jsonl --summary outputs\evidence_gate_train_standard40_summary.json
 ```
 
-`--no-rag` is used for deterministic MVP calibration. The local RAG manifest currently records a CUDA device, and this machine's Torch build is CPU-only.
+`--no-rag` is used for rule-based MVP calibration. The local RAG manifest currently records a CUDA device, and this machine's Torch build is CPU-only.
 
 ## Current Reference Results
 
@@ -67,7 +67,7 @@ Failure analysis from `outputs/evidence_gate_train_standard40_failures.json`:
 
 `soc_defender` agent runs include `graph_trace` for local defender modes. Baseline runs have an empty `graph_trace`.
 
-The deterministic defender reports normalized `containment_actions` from executed environment state. Baseline model reports may contain intended containment in `summary_json` that was never executed.
+The rule-based defender reports normalized `containment_actions` from executed environment state. Baseline model reports may contain intended containment in `summary_json` that was never executed.
 
 ## Remaining Parity Work
 

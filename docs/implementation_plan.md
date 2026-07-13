@@ -8,7 +8,7 @@ See also:
 - [`prompt_injection_regex_classifier_plan.md`](prompt_injection_regex_classifier_plan.md) - regex Layer 1 detail
 - [`ig_051c06bfa1084279016a3ba849412481918964dbaf1e7c3121.png`](ig_051c06bfa1084279016a3ba849412481918964dbaf1e7c3121.png) - revised architecture diagram
 - [`../opensec-env/docs/opensec-technical-report.pdf`](../opensec-env/docs/opensec-technical-report.pdf) - benchmark motivation and metrics
-- [`../opensec-env/docs/EVAL_PROTOCOL.md`](../opensec-env/docs/EVAL_PROTOCOL.md) - deterministic eval protocol
+- [`../opensec-env/docs/EVAL_PROTOCOL.md`](../opensec-env/docs/EVAL_PROTOCOL.md) - reproducible eval protocol
 - [`../opensec-env/docs/ORACLE_SPEC.md`](../opensec-env/docs/ORACLE_SPEC.md) - scoring rules
 - [`../opensec-env/docs/SCHEMA_SPEC.md`](../opensec-env/docs/SCHEMA_SPEC.md) - seed/action/observation schema
 
@@ -159,11 +159,11 @@ Use this split instead:
 
 | Pipeline box | MVP implementation | Later full-agentic wrapper |
 |---|---|---|
-| Injection Scanner | deterministic module returning annotations | scanner agent can call regex/PG-2/localizer tools |
-| Evidence Investigator | deterministic evidence planner plus registry updates | investigator agent must use an internal LLM to analyze state and choose among evidence tools, but cannot propose containment/report final actions |
-| Step Budget Controller | deterministic policy function | stays deterministic |
-| Evidence Gate + Verifier | deterministic gate with LLM-backed verifier stubbed in tests; owns final-action candidacy | verifier agent must use an internal LLM to analyze evidence coherence and select the final-action candidate, but cannot bypass deterministic gates |
-| Responder | deterministic action/report builder | responder agent may format the verifier-approved action/report, still through action adapter |
+| Injection Scanner | rule-based module returning annotations | scanner agent can call regex/PG-2/localizer tools |
+| Evidence Investigator | rule-based evidence planner plus registry updates | investigator agent must use an internal LLM to analyze state and choose among evidence tools, but cannot propose containment/report final actions |
+| Step Budget Controller | rule-based policy function | stays rule-based |
+| Evidence Gate + Verifier | evidence-based gate with LLM-backed verifier stubbed in tests; owns final-action candidacy | verifier agent must use an internal LLM to analyze evidence coherence and select the final-action candidate, but cannot bypass policy-enforced gates |
+| Responder | policy-enforced action/report builder | responder agent may format the verifier-approved action/report, still through action adapter |
 | RAG Intel | optional retrieval helper | RAG agent/tool used by investigator/verifier |
 | LangGraph State | not required for MVP | audit spine and orchestration layer for `full_agentic` mode |
 
@@ -184,7 +184,7 @@ The full proposed agentic implementation has three internal defender-side LLM ca
 
 1. **Injection Scanner localizer** - called only after regex/Prompt Guard flags suspicious content. It returns untrusted spans and preserved IOCs.
 2. **Evidence Investigator LLM** - called each committed environment step before action selection. It reads the current observation, registry, prior committed actions, attacker state, report gaps, budget phase, and scanner annotations. It may output investigation intent only: what evidence to fetch/query next and why. It must not output containment or report actions.
-3. **Verifier LLM** - called after RAG context, investigator state, registry state, and budget state are assembled. It reads the registry, report readiness, investigation intent, candidate evidence support, scanner annotations, RAG context if enabled, and step budget. It owns final-action candidacy and may select investigation, gated containment, or report submission, subject to deterministic EGAR/action-schema gates.
+3. **Verifier LLM** - called after RAG context, investigator state, registry state, and budget state are assembled. It reads the registry, report readiness, investigation intent, candidate evidence support, scanner annotations, RAG context if enabled, and step budget. It owns final-action candidacy and may select investigation, gated containment, or report submission, subject to policy-enforced EGAR/action-schema gates.
 
 The intended full-agentic order is:
 
@@ -199,7 +199,7 @@ observation + prior committed-action state
        annotates which committed action classes are allowed now
   -> Verifier LLM
        makes sense of the trajectory so far and selects a final-action candidate
-  -> deterministic gates/action adapter
+  -> policy-enforced gates/action adapter
   -> Responder commits exactly one OpenSec AgentAction via env.step()
 ```
 
@@ -430,7 +430,7 @@ class EvidenceInvestigator:
     ) -> InvestigationIntent: ...
 ```
 
-The investigator must use an internal LLM in `full_agentic` mode after RAG intel is retrieved for the current entities, attacker stage, and report gaps. It analyzes state so far, identifies evidence gaps, summarizes uncertainty, and proposes where to investigate next. It cannot emit or recommend `isolate_host`, `block_domain`, `reset_user`, or `submit_report`. Those action types belong to the verifier/responder path only. For MVP/unit tests, use a deterministic investigator stub with the same `InvestigationIntent` output schema.
+The investigator must use an internal LLM in `full_agentic` mode after RAG intel is retrieved for the current entities, attacker stage, and report gaps. It analyzes state so far, identifies evidence gaps, summarizes uncertainty, and proposes where to investigate next. It cannot emit or recommend `isolate_host`, `block_domain`, `reset_user`, or `submit_report`. Those action types belong to the verifier/responder path only. For MVP/unit tests, use a rule-based investigator stub with the same `InvestigationIntent` output schema.
 
 ### Evidence Registry
 
@@ -486,7 +486,7 @@ class Verifier:
     ) -> VerifiedActionCandidate: ...
 ```
 
-The verifier must use an internal LLM in `full_agentic` mode after the investigator has produced an evidence summary and investigation intent. It analyzes evidence coherence, kill-chain consistency, report readiness, RAG support, budget phase, and whether the next committed action should be investigation, containment, or report submission. Deterministic EGAR, schema, budget, and action/entity gates remain authoritative: if the LLM selects an unsafe containment action, the verifier must reject it and return a legal investigation or report action instead. For MVP/unit tests, use a deterministic verifier stub with the same `VerifiedActionCandidate` output schema.
+The verifier must use an internal LLM in `full_agentic` mode after the investigator has produced an evidence summary and investigation intent. It analyzes evidence coherence, kill-chain consistency, report readiness, RAG support, budget phase, and whether the next committed action should be investigation, containment, or report submission. Policy-enforced EGAR, schema, budget, and action/entity gates remain authoritative: if the LLM selects an unsafe containment action, the verifier must reject it and return a legal investigation or report action instead. For MVP/unit tests, use a rule-based verifier stub with the same `VerifiedActionCandidate` output schema.
 
 ### SQL Planner
 
@@ -612,7 +612,7 @@ Verifier limits:
 - internal replans are allowed only before the committed `env.step()` action is chosen
 - Investigator LLM and Verifier LLM calls are internal and do not advance the OpenSec step counter
 - use one Investigator LLM call and one Verifier LLM call per committed environment step in `full_agentic`, unless a local retry is needed for invalid JSON/schema repair
-- deterministic EGAR/action-schema gates remain authoritative over LLM judgment
+- policy-enforced EGAR/action-schema gates remain authoritative over LLM judgment
 - rejected containment becomes exactly one evidence-seeking action if an action must be committed this environment step
 
 ## Evidence Registry
@@ -744,9 +744,9 @@ Do not use RAG to override missing evidence. A containment action with no exact 
 | Mode | Description |
 |---|---|
 | `baseline` | pass-through; must match upstream OpenSec eval for same seeds/model/replay cache |
-| `evidence_gate_only` | MVP: evidence registry, step budget, report readiness, deterministic EGAR gate |
+| `evidence_gate_only` | MVP: evidence registry, step budget, report readiness, evidence-based EGAR gate |
 | `scanner_only` | regex/PG-2 marks untrusted spans; no containment hard gate |
-| `regex_plus_gate` | scanner plus deterministic evidence gate |
+| `regex_plus_gate` | scanner plus evidence-based safety gate |
 | `rag_only` | RAG context added, but containment gate still enforced |
 | `full_agentic` | scanner + registry + budget controller + RAG-before-Investigator + Investigator LLM + Verifier LLM + LangGraph + evidence gate |
 
@@ -878,7 +878,7 @@ flowchart TD
 
 ### Phase 4 - Evidence Gate + Budget Controller
 
-- Implement `defender/verifier.py` as the deterministic EGAR gate.
+- Implement `defender/verifier.py` as the evidence-based EGAR gate.
 - Implement step schedule and gate modifiers.
 - Convert rejected containment to one targeted investigation step.
 - Add unit tests for untrusted-only evidence, trusted exact-entity evidence, entity/action mismatch, and budget behavior.
@@ -918,7 +918,7 @@ flowchart TD
 
 ### Phase 10 - LangGraph Full Agentic
 
-- Add LangGraph orchestration last, after deterministic modules and RAG are stable.
+- Add LangGraph orchestration last, after rule-based modules and RAG are stable.
 - Implement `DefenderGraphState` as the full internal episode state and audit trace.
 - Add LangGraph nodes for scanner, registry update, RAG, Investigator LLM, budget controller, Verifier LLM, evidence gate, responder, and OpenSec commit.
 - Use LangChain wrappers for Investigator/Verifier prompts, structured output parsing, and retriever adapters only.
@@ -1014,7 +1014,7 @@ That MVP should include:
 - evidence registry
 - action validator
 - SQL planner
-- deterministic EGAR gate
+- evidence-based EGAR gate
 - 15-step budget controller
 - report readiness tracker
 - failure analysis script
