@@ -9,6 +9,7 @@ from .investigator import InvestigationIntent, Investigator, LLMVerifier, Verifi
 from .observation import parse_observation
 from .policy import DefenderPolicy
 from .rag import RAGIntel
+from .rag_context import prepare_rag_context, rag_trace_references, scan_rag_documents
 from .responder import Responder, action_payload, verified_candidate_payload
 from .scanner import InjectionScanner
 
@@ -30,6 +31,8 @@ class DefenderGraph:
         )
         state.parsed_observation = parse_observation(observation)
         self.policy.ensure_scenario(state.parsed_observation)
+        if self.policy.rag_called:
+            state.rag_context = list(self.policy.rag_context_cache)
         state.episode_summary = dict(self.policy.episode_summary)
         self._scanner_node(state)
         self._registry_node(state)
@@ -89,9 +92,11 @@ class DefenderGraph:
                     "query": state.rag_query,
                     "documents": len(state.rag_context),
                     "top_documents": [
-                        {"source": doc.get("source"), "title": doc.get("title")}
-                        for doc in state.rag_context[:3]
+                        dict(reference) for reference in self.policy.rag_audit_cache[:3]
                     ],
+                    "unsafe_documents": sum(
+                        reference.get("scanner_status") != "clean" for reference in self.policy.rag_audit_cache
+                    ),
                     "rag_cost": 0,
                     "cache_hit": True,
                     "rag_called": True,
@@ -118,9 +123,39 @@ class DefenderGraph:
             )
             return
 
-        docs = self.rag.context_for(query)
-        state.rag_context = [asdict(doc) for doc in docs]
+        try:
+            docs = self.rag.context_for(query)
+        except Exception as exc:
+            state.rag_context = []
+            self.policy.rag_context_cache = []
+            self.policy.rag_audit_cache = []
+            self.policy.rag_query_cache = query
+            self.policy.rag_called = True
+            self.policy.rag_call_step = step_index
+            state.append_trace(
+                "rag",
+                {
+                    "strategy": "single_episode_rag",
+                    "query": query,
+                    "documents": 0,
+                    "top_documents": [],
+                    "unsafe_documents": 0,
+                    "rag_cost": 1,
+                    "cache_hit": False,
+                    "rag_called": True,
+                    "rag_call_step": step_index,
+                    "retrieval_error": {
+                        "type": type(exc).__name__,
+                        "message": str(exc)[:300],
+                    },
+                },
+            )
+            return
+        scanned_docs = scan_rag_documents(docs, self.scanner)
+        state.rag_context = prepare_rag_context(scanned_docs)
+        audit_references = rag_trace_references(scanned_docs)
         self.policy.rag_context_cache = list(state.rag_context)
+        self.policy.rag_audit_cache = list(audit_references)
         self.policy.rag_query_cache = query
         self.policy.rag_called = True
         self.policy.rag_call_step = step_index
@@ -129,8 +164,12 @@ class DefenderGraph:
             {
                 "strategy": "single_episode_rag",
                 "query": query,
-                "documents": len(docs),
-                "top_documents": [{"source": doc.source, "title": doc.title} for doc in docs[:3]],
+                "documents": len(state.rag_context),
+                "retrieved_documents": len(docs),
+                "top_documents": audit_references[:3],
+                "unsafe_documents": sum(
+                    reference.get("scanner_status") != "clean" for reference in audit_references
+                ),
                 "rag_cost": 1,
                 "cache_hit": False,
                 "rag_called": True,

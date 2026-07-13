@@ -26,6 +26,7 @@ class DefenderPolicy:
     attempted_containment: set[tuple[str, str]] = field(default_factory=set)
     current_scenario_id: str | None = None
     rag_context_cache: list[dict[str, Any]] = field(default_factory=list)
+    rag_audit_cache: list[dict[str, Any]] = field(default_factory=list)
     rag_query_cache: str = ""
     rag_called: bool = False
     rag_call_step: int | None = None
@@ -77,6 +78,7 @@ class DefenderPolicy:
         self.fetched_alerts.clear()
         self.attempted_containment.clear()
         self.rag_context_cache.clear()
+        self.rag_audit_cache.clear()
         self.rag_query_cache = ""
         self.rag_called = False
         self.rag_call_step = None
