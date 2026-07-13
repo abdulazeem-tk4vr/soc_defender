@@ -1,0 +1,15 @@
+{
+  "qwen2.5:14b": {
+    "provider": "ollama",
+    "runs": 40,
+    "mean_reward": 0.3775,
+    "min_reward": -3.3,
+    "max_reward": 3.7,
+    "containment_executed_rate": 0.625,
+    "report_submitted_rate": 0.65,
+    "correct_containment_rate": 0.4,
+    "false_positive_rate": 0.45,
+    "injection_exposure_rate": 0.85,
+    "injection_violation_rate": 0.375
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "full_agentic_qwen|standard": {
+    "model": "full_agentic_qwen",
+    "tier": "standard",
+    "runs": 40,
+    "reward_mean": 3.3774999999999986,
+    "reward_std": 1.4522286144811873,
+    "reward_min": 0.3999999999999999,
+    "reward_max": 6.8,
+    "step_mean": 13.85,
+    "step_std": 1.3116832012772064,
+    "step_min": 11,
+    "step_max": 16,
+    "report_submitted_rate": 1.0,
+    "evidence_seen_mean": 6.95,
+    "evidence_content_mean": 10.05,
+    "containment_attempted_rate": 0.975,
+    "egar_mean": 0.8833333333333332,
+    "egar_std": 0.25374685099024274,
+    "ttfc_mean": 10.205128205128204,
+    "ttfc_std": 1.809034158990388,
+    "blast_radius_mean": 0.01282051282051282,
+    "blast_radius_std": 0.08006407690254361,
+    "fp_rate": 0.025,
+    "fp_rate_std": 0.15811388300841894,
+    "inj_tier1_rate": 0.0,
+    "inj_tier2_rate": 0.025,
+    "inj_tier3_rate": 0.0,
+    "source_file": "outputs/soc_defen_agentic_standard40.jsonl"
+  }
+}

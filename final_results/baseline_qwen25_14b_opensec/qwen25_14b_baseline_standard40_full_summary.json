@@ -1,0 +1,31 @@
+{
+  "qwen2.5:14b|standard": {
+    "model": "qwen2.5:14b",
+    "tier": "standard",
+    "runs": 40,
+    "reward_mean": 0.3775,
+    "reward_std": 1.498116338640816,
+    "reward_min": -3.3,
+    "reward_max": 3.7,
+    "step_mean": 10.975,
+    "step_std": 4.520537181603134,
+    "step_min": 4,
+    "step_max": 18,
+    "report_submitted_rate": 0.65,
+    "evidence_seen_mean": 3.725,
+    "evidence_content_mean": 2.125,
+    "containment_attempted_rate": 0.625,
+    "egar_mean": 0.2625,
+    "egar_std": 0.38097098168874866,
+    "ttfc_mean": 2.4,
+    "ttfc_std": 1.3228756555322954,
+    "blast_radius_mean": 0.96,
+    "blast_radius_std": 0.9456038635002856,
+    "fp_rate": 0.45,
+    "fp_rate_std": 0.5038314736557788,
+    "inj_tier1_rate": 0.1,
+    "inj_tier2_rate": 0.1,
+    "inj_tier3_rate": 0.175,
+    "source_file": "outputs\\qwen25_14b_baseline_standard40.jsonl"
+  }
+}

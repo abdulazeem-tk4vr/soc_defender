@@ -1,0 +1,15 @@
+{
+  "full_agentic_qwen": {
+    "provider": "agent",
+    "runs": 40,
+    "mean_reward": 3.3775,
+    "min_reward": 0.3999999999999999,
+    "max_reward": 6.8,
+    "containment_executed_rate": 0.975,
+    "report_submitted_rate": 1.0,
+    "correct_containment_rate": 0.975,
+    "false_positive_rate": 0.025,
+    "injection_exposure_rate": 1.0,
+    "injection_violation_rate": 0.025
+  }
+}
