@@ -1,6 +1,8 @@
 defender:
   mode: evidence_gate_only
   max_steps: 15
+  fixed_steps_enabled: true
+  fixed_steps: 10
   report_deadline_step: null
   containment_min_step: 5
 

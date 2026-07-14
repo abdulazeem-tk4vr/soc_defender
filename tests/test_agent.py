@@ -17,10 +17,21 @@ def test_soc_defender_agent_emits_direct_action_from_observation():
 
     assert action["action_type"] == "fetch_alert"
     assert action["params"] == {"alert_id": "alert-1"}
+    assert agent.max_steps == 10
+
+
+def test_fixed_steps_are_configurable_and_can_be_disabled():
+    configured = SocDefenderAgent(max_steps=17, fixed_steps=7)
+    disabled = SocDefenderAgent(max_steps=17, fixed_steps_enabled=False)
+
+    assert configured.max_steps == 7
+    assert configured.policy.max_steps == 7
+    assert disabled.max_steps == 17
+    assert disabled.policy.max_steps == 17
 
 
 def test_next_action_remains_agent_alias():
-    agent = SocDefenderAgent(mode="evidence_gate_only", max_steps=15)
+    agent = SocDefenderAgent(mode="evidence_gate_only", max_steps=15, fixed_steps_enabled=False)
     action = agent.next_action(
         {
             "scenario_id": "s-1",
@@ -34,7 +45,7 @@ def test_next_action_remains_agent_alias():
 
 
 def test_report_deadline_uses_episode_max_steps():
-    agent = SocDefenderAgent(mode="evidence_gate_only", max_steps=17)
+    agent = SocDefenderAgent(mode="evidence_gate_only", max_steps=17, fixed_steps_enabled=False)
     step_14_action = agent.next_action(
         {
             "scenario_id": "s-1",

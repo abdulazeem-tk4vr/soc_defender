@@ -17,11 +17,15 @@ from .prompt_guard import LLMLocalizer, PromptGuard2
 from .rag import RAGIntel
 from .scanner import InjectionScanner
 
+DEFAULT_FIXED_STEPS = 10
+
 
 @dataclass
 class SocDefenderAgent:
     mode: str = "evidence_gate_only"
     max_steps: int = 15
+    fixed_steps_enabled: bool = True
+    fixed_steps: int = DEFAULT_FIXED_STEPS
     llm_client: LLMClient | None = None
     rag: RAGIntel | None = None
     prompt_guard2_model: str | None = None
@@ -33,6 +37,10 @@ class SocDefenderAgent:
     def __post_init__(self) -> None:
         if self.mode not in {"evidence_gate_only", "full_agentic"}:
             raise ValueError(f"Unsupported soc_defender agent mode: {self.mode}")
+        if self.fixed_steps < 1:
+            raise ValueError("fixed_steps must be at least 1")
+        if self.fixed_steps_enabled:
+            self.max_steps = self.fixed_steps
         self.policy = DefenderPolicy(mode=self.mode, max_steps=self.max_steps)
         if self.mode == "full_agentic":
             prompt_guard2 = PromptGuard2(self.prompt_guard2_model) if self.prompt_guard2_model else None
@@ -78,6 +86,8 @@ def build_agent(
     rag: RAGIntel | None = None,
     prompt_guard2_model: str | None = None,
     use_langgraph: bool = False,
+    fixed_steps_enabled: bool = True,
+    fixed_steps: int = DEFAULT_FIXED_STEPS,
 ) -> SocDefenderAgent:
     llm_client: LLMClient | None = None
     if agent_llm == "ollama":
@@ -91,6 +101,8 @@ def build_agent(
         rag=rag,
         prompt_guard2_model=prompt_guard2_model,
         use_langgraph=use_langgraph,
+        fixed_steps_enabled=fixed_steps_enabled,
+        fixed_steps=fixed_steps,
     )
 
 def _append_agent_trace(action: dict[str, Any], state: DefenderGraphState) -> None:
