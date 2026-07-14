@@ -87,6 +87,103 @@ py scripts\eval.py --defender evidence_gate_only --no-rag --split train --limit 
 The local helper expects the OpenSec checkout at `..\opensec-env` by default. Use
 `--opensec-root path\to\opensec-env` if yours lives elsewhere.
 
+The command above is intended for a quick SOC Defender smoke test. For canonical
+benchmark runs, use OpenSec's native evaluator as described below.
+
+## Canonical OpenSec Evaluation
+
+Canonical evaluations should be launched from the OpenSec checkout with OpenSec's
+native `scripts/eval.py`. Its `scripts/agent.py` supports `provider: agent`, imports
+`build_agent` from the sibling `soc_defender` checkout, and runs the SOC Defender
+through the standard OpenSec environment, seeds, episode loop, and scoring path.
+
+Expected workspace layout:
+
+```text
+/workspace/
+├── .venv/
+├── opensec-env/
+└── soc_defender/
+```
+
+### Start Ollama without systemd
+
+Install Ollama if it is not already available:
+
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
+```
+
+Start the server as a background process and retain its PID:
+
+```bash
+mkdir -p /workspace/logs
+nohup env OLLAMA_HOST=0.0.0.0:11434 OLLAMA_KEEP_ALIVE=-1 \
+  ollama serve > /workspace/logs/ollama.log 2>&1 &
+echo $! > /workspace/logs/ollama.pid
+```
+
+Wait for the API and pull Qwen 2.5 14B:
+
+```bash
+until curl -sf http://localhost:11434/api/tags >/dev/null; do sleep 2; done
+ollama pull qwen2.5:14b
+```
+
+Preload the model and keep it resident until Ollama stops:
+
+```bash
+curl -sf http://localhost:11434/api/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "qwen2.5:14b",
+    "prompt": "",
+    "stream": false,
+    "keep_alive": -1
+  }'
+curl -sf http://localhost:11434/api/ps
+```
+
+### Run the canonical standard-40 evaluation
+
+Run from OpenSec, not from the SOC Defender checkout:
+
+```bash
+cd /workspace/opensec-env
+
+export OLLAMA_BASE_URL="http://localhost:11434"
+export OLLAMA_MODEL="qwen2.5:14b"
+export OLLAMA_TIMEOUT="300"
+
+/workspace/.venv/bin/python scripts/eval.py \
+  --config configs/soc_defender_agents.yaml \
+  --split eval \
+  --tier standard \
+  --limit 40 \
+  --output outputs/qwen25_14b_standard40.jsonl \
+  --summary outputs/qwen25_14b_standard40_summary.json \
+  --llm-log outputs/qwen25_14b_standard40_llm.jsonl
+```
+
+This uses the following integration path:
+
+```text
+OpenSec scripts/eval.py
+  -> OpenSec scripts/agent.py
+  -> soc_defender/defender.build_agent()
+  -> Ollama qwen2.5:14b
+```
+
+On the `fixed_steps` branch, the enabled fixed-step policy gives the SOC Defender
+an internal 10-step deadline even when OpenSec supplies a different episode limit.
+The OpenSec environment retains control of the outer episode loop and scoring.
+
+To stop the background Ollama server:
+
+```bash
+kill "$(cat /workspace/logs/ollama.pid)"
+```
+
 ## RAG and Security Context
 
 RAG is optional. A local Qdrant index can be supplied with `--rag-path`, or disabled
